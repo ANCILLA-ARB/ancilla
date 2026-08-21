@@ -9,7 +9,26 @@
       "revealWindowSeconds": 120,
       "minBond": "1000000000000000",
       "treasury": "0x5d01654edC4C618947e054E541b1937b7D165975"
+    },
+    "TestTokenA": {
+      "address": "0xCf7fC3b5A96cc8ef46D558fB455B63ec862ba977",
+      "name": "Ancilla Test USD",
+      "symbol": "aUSD"
+    },
+    "TestTokenB": {
+      "address": "0x9487f45a0fEf6C96d1571Ae7B32f020995710f73",
+      "name": "Ancilla Test ETH",
+      "symbol": "aETH"
+    },
+    "AncillaSwapPool": {
+      "address": "0x3663a10bB68cEbe477843673385d5D97ea12cb0b",
+      "tokenA": "0xCf7fC3b5A96cc8ef46D558fB455B63ec862ba977",
+      "tokenB": "0x9487f45a0fEf6C96d1571Ae7B32f020995710f73"
+    },
+    "SwapExecutor": {
+      "address": "0x10896dDf2e5D5E9fbc2Eb3dd2C65719A86aaDc76",
+      "pool": "0x3663a10bB68cEbe477843673385d5D97ea12cb0b"
     }
   },
-  "_comment": "Single source of truth for what's actually live on Arbitrum Sepolia. Values above verified directly on-chain (not copied from a deploy log) before this file was created. scripts/deploy.ts overwrites the IntentCommitReveal entry on every fresh deploy; scripts/demo*.ts read from here instead of each hardcoding their own (previously inconsistent, some stale) copy of the address."
+  "_comment": "Single source of truth for what's actually live on Arbitrum Sepolia. Values above verified directly on-chain (not copied from a deploy log) before this file was created. scripts/deploy.ts overwrites the IntentCommitReveal entry on every fresh deploy; scripts/deploy-swap.ts overwrites the TestTokenA/TestTokenB/AncillaSwapPool/SwapExecutor entries on every fresh deploy, without touching IntentCommitReveal; scripts/demo*.ts read from here instead of each hardcoding their own (previously inconsistent, some stale) copy of the address."
 }

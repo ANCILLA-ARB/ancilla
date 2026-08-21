@@ -48,9 +48,12 @@ deck.
   hash matched": commit a swap privately → reveal inside a shared batch
   window → **a real swap executes**, with real constant-product-formula
   output, verified against an independently-computed expected value, not
-  just "the contract agrees with itself." See the header comments on both
-  files for the deliberate simplifications (no LP tokens, single pair, no
-  MEV protection on the swap price itself — only on when/who submits the
+  just "the contract agrees with itself." **Proven live on Arbitrum
+  Sepolia** (`npm run demo-swap:sepolia`, [`scripts/demo-swap.ts`](scripts/demo-swap.ts))
+  — not just in `hardhat test` — see "Currently live on Arbitrum Sepolia"
+  below for the deployed addresses and tx links. See the header comments on
+  both files for the deliberate simplifications (no LP tokens, single pair,
+  no MEV protection on the swap price itself — only on when/who submits the
   reveal).
 - [`sdk/intent.ts`](sdk/intent.ts) — the off-chain helper an agent operator
   calls to build a commitment (hash) before submitting `commitIntent()`.
@@ -209,6 +212,10 @@ them stale — caught and fixed in a cleanup pass, not before.)
 | Contract | Address |
 |---|---|
 | `IntentCommitReveal` (relay support + bond locking) | [`0xb2a513260DA2e61490386B3BE1773DB99d5a91f3`](https://sepolia.arbiscan.io/address/0xb2a513260DA2e61490386B3BE1773DB99d5a91f3) |
+| `TestTokenA` (aUSD, mintable test ERC20) | [`0xCf7fC3b5A96cc8ef46D558fB455B63ec862ba977`](https://sepolia.arbiscan.io/address/0xCf7fC3b5A96cc8ef46D558fB455B63ec862ba977) |
+| `TestTokenB` (aETH, mintable test ERC20) | [`0x9487f45a0fEf6C96d1571Ae7B32f020995710f73`](https://sepolia.arbiscan.io/address/0x9487f45a0fEf6C96d1571Ae7B32f020995710f73) |
+| `AncillaSwapPool` (constant-product AMM, aUSD/aETH) | [`0x3663a10bB68cEbe477843673385d5D97ea12cb0b`](https://sepolia.arbiscan.io/address/0x3663a10bB68cEbe477843673385d5D97ea12cb0b) |
+| `SwapExecutor` (real `IIntentExecutor`) | [`0x10896dDf2e5D5E9fbc2Eb3dd2C65719A86aaDc76`](https://sepolia.arbiscan.io/address/0x10896dDf2e5D5E9fbc2Eb3dd2C65719A86aaDc76) |
 
 Deployed with `commitWindowSeconds=120`, `revealDelaySeconds=30`,
 `revealWindowSeconds=120`, `minBond=0.001 ETH`. Source is not yet verified on
@@ -224,6 +231,24 @@ re-run against every deployment (testnet ETH for the demo wallets ran low
 partway through this session, and topping up requires a manual faucet claim
 — not something worth overstating just to avoid saying that):
 
+- **Real swap execution** (`npm run demo-swap:sepolia`,
+  [`scripts/demo-swap.ts`](scripts/demo-swap.ts)) — verified live against
+  **this exact deployment**, all four swap-stack contracts above. Seeds
+  pool liquidity, mints the agent 1000 aUSD, quotes the expected output via
+  `pool.getAmountOut()` *before* committing, commits the swap intent
+  (on-chain, only the hash visible), waits out the real batch reveal
+  window, then reveals — which is the moment `SwapExecutor` pulls the
+  aUSD, calls `pool.swap()`, and sends aETH back to the agent. Verified
+  independently afterward, not just trusted from script output: agent's
+  on-chain aETH balance (`0.493579017198530649`) matched the pre-commit
+  quote *exactly*, aUSD balance was 0, and both the pool's `Swap` event and
+  `SwapExecutor`'s `IntentSwapExecuted` event were each found once. Example
+  tx sequence: [seed liquidity](https://sepolia.arbiscan.io/tx/0x1dc5c704d2ea5b3d8509011559be754500ed4dc52fee93a139b355af4b31bb07),
+  [deposit bond](https://sepolia.arbiscan.io/tx/0x54791f6a1317bcba838ce3cb07465ef33d40af1a7119c7e23149f8a9a3f45506),
+  [commit intent](https://sepolia.arbiscan.io/tx/0xcbf01b7312e308f44a235442ead261014e46a8eb65cea4489dea4d7a1146d5be),
+  [reveal + real swap](https://sepolia.arbiscan.io/tx/0x58c076f8f5b52791b33311cc689efc7b266da529a131551e6733118110c53111).
+  This closes what was, until now, the single biggest gap between "tested
+  locally" and "the project's actual core narrative, proven live."
 - **Bond locking** (`npm run demo-bond-lock:sepolia`, `scripts/demo-bond-lock.ts`)
   — verified live against **this exact deployment**
   (`0xb2a51326...5a91f3`). Commits an intent, then immediately attempts to

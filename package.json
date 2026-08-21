@@ -10,10 +10,12 @@
     "gas-report": "cross-env REPORT_GAS=true hardhat test",
     "size": "hardhat size-contracts",
     "deploy:sepolia": "hardhat run scripts/deploy.ts --network arbitrumSepolia",
+    "deploy-swap:sepolia": "hardhat run scripts/deploy-swap.ts --network arbitrumSepolia",
     "deploy:local": "hardhat run scripts/deploy-local.ts --network localhost",
     "demo:sepolia": "hardhat run scripts/demo.ts --network arbitrumSepolia",
     "demo-relay:sepolia": "hardhat run scripts/demo-relay.ts --network arbitrumSepolia",
     "demo-bond-lock:sepolia": "hardhat run scripts/demo-bond-lock.ts --network arbitrumSepolia",
+    "demo-swap:sepolia": "hardhat run scripts/demo-swap.ts --network arbitrumSepolia",
     "relay-server": "ts-node relay-server/index.ts",
     "relay-server:e2e": "ts-node scripts/relay-server-e2e.ts",
     "relay-server:multi-e2e": "ts-node scripts/relay-server-multi-e2e.ts"
