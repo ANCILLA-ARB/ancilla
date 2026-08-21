@@ -1,0 +1,43 @@
+# Fly.io app config for the Ancilla relay-server ONLY — nothing else in
+# this repo gets deployed this way. See relay-server/DEPLOYMENT.md before
+# using this: it needs `app` below changed to a name you actually own, and
+# every secret set via `fly secrets set` (never committed to this file or
+# anywhere else in the repo).
+#
+# Deploy with: fly launch --copy-config --no-deploy   (first time, to claim
+# an app name against this config) then `fly deploy` from the repo root.
+
+app = "CHANGE-ME-ancilla-relay-server"
+primary_region = "sjc" # pick whichever Fly region is actually closest to you
+
+[build]
+  dockerfile = "relay-server/Dockerfile"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  auto_stop_machines = false # this is a long-running poll worker, not a request-only service
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "10s"
+  method = "GET"
+  path = "/health"
+
+# The pending-reveal queue is a local JSON file (RELAY_STORE_PATH) — without
+# a mounted volume it's lost on every redeploy/restart, which matters for
+# reveals accepted but not yet confirmed at the moment of a restart (see
+# DEPLOYMENT.md's persistence section). Uncomment both blocks below, and
+# run `fly volumes create ancilla_relay_data --size 1` first, to persist it:
+#
+# [mounts]
+#   source = "ancilla_relay_data"
+#   destination = "/data"
+#
+# then set RELAY_STORE_PATH=/data/queue.json as an env var/secret.
+
+[env]
+  RELAY_PORT = "8787"

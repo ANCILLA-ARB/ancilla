@@ -20,16 +20,21 @@ two ways:
   relay-server package had zero automated test coverage — everything was
   manual E2E runs.
 
-**What this is NOT:** a hosted, production, always-on service. Running it
-means starting a local Node process that lives as long as your terminal
-does. There is no deployment to a VPS/cloud host, no TLS, no
-authentication or rate-limiting, and no coordination between multiple
-instances beyond both racing on the same permissionless contract functions
-(see "Redundancy" below — this covers one failure mode, not full
-decentralization: there's still no relay operator discovery, reputation,
-or staking). Turning this into a real, trustworthy public service is
-genuine infrastructure work outside what this repo delivers — see the main
-[README](../README.md)'s roadmap section.
+**What this is NOT:** a hosted, production, always-on service — not yet, at
+least. Running it still means starting a Node process yourself somewhere;
+this repo doesn't operate a public instance of it. What changed: there is
+now a real Dockerfile, a `build:relay-server` script (compiles just this
+package, not the whole repo), and Fly.io/Railway deployment configs — see
+[`DEPLOYMENT.md`](DEPLOYMENT.md) — proven to actually work (the compiled
+binary was run through the full commit → HTTP → reveal → on-chain-confirm
+flow, not just started and left idle). What's still missing: nobody has
+actually deployed an instance to a real host yet — that needs a hosting
+account and a decision only the project owner can make, not more
+engineering — plus TLS, authentication/rate-limiting, and coordination
+between multiple instances beyond both racing on the same permissionless
+contract functions (see "Redundancy" below — that covers one failure mode,
+not full decentralization: there's still no relay operator discovery,
+reputation, or staking).
 
 ## Redundancy: surviving a relay going down
 

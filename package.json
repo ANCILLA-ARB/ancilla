@@ -24,7 +24,9 @@
     "demo-slasher-reward:sepolia": "hardhat run scripts/demo-slasher-reward.ts --network arbitrumSepolia",
     "relay-server": "ts-node relay-server/index.ts",
     "relay-server:e2e": "ts-node scripts/relay-server-e2e.ts",
-    "relay-server:multi-e2e": "ts-node scripts/relay-server-multi-e2e.ts"
+    "relay-server:multi-e2e": "ts-node scripts/relay-server-multi-e2e.ts",
+    "build:relay-server": "tsc -p relay-server/tsconfig.json",
+    "start:relay-server": "node dist/relay-server/index.js"
   },
   "keywords": [
     "arbitrum",
@@ -60,7 +62,6 @@
     "@types/supertest": "^7.2.1",
     "chai": "^4.5.0",
     "cross-env": "^10.1.0",
-    "dotenv": "^17.4.2",
     "hardhat": "^2.29.1",
     "hardhat-contract-sizer": "^2.10.1",
     "solmate": "^6.8.0",
@@ -72,6 +73,8 @@
     "@openzeppelin/contracts": "^5.6.1",
     "@uniswap/v4-core": "^1.0.2",
     "@uniswap/v4-periphery": "^1.0.3",
+    "dotenv": "^17.4.2",
+    "ethers": "^6.17.0",
     "express": "^5.2.1"
   }
 }

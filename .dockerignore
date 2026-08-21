@@ -1,0 +1,14 @@
+# Keeps the Docker build context small and the image free of anything that
+# doesn't belong in a deployed relay-server — contracts/tests/tooling are
+# irrelevant to it and would only bloat the build.
+node_modules/
+dist/
+artifacts/
+cache/
+typechain-types/
+coverage/
+coverage.json
+.env
+relay-server/local-deployment.json
+relay-server/.queue-*.json
+.git/
