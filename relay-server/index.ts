@@ -41,7 +41,14 @@ dotenv.config({ quiet: true });
  * discovery/reputation, which is unbuilt.
  */
 
-const PORT = process.env.RELAY_PORT ? Number(process.env.RELAY_PORT) : 8787;
+// Most PaaS platforms (Railway, Heroku, Render, ...) assign a port
+// dynamically and inject it as `PORT`, then route external traffic to
+// exactly that port regardless of what the app was told to listen on —
+// ignoring this is a common cause of a container that builds and starts
+// fine but never passes a platform's healthcheck. `PORT` wins if present;
+// `RELAY_PORT` (this project's own name) is the fallback for running it
+// standalone/locally, matching every other script in this repo.
+const PORT = process.env.PORT ? Number(process.env.PORT) : process.env.RELAY_PORT ? Number(process.env.RELAY_PORT) : 8787;
 const RPC_URL = process.env.RELAY_RPC_URL || "http://127.0.0.1:8545";
 const CONTRACT_ADDRESS = process.env.RELAY_CONTRACT_ADDRESS;
 const RELAY_PRIVATE_KEY = process.env.RELAY_PRIVATE_KEY;

@@ -26,12 +26,24 @@ That part is yours to do, on whichever provider you choose.
   with `Cannot find module 'ethers'`. Fixed by moving both to
   `dependencies` where they actually belong, given the relay-server needs
   them at runtime.
-- **What was NOT verified:** the actual `docker build` — Docker isn't
-  available in the sandbox this was built in. The Dockerfile's individual
-  steps (`npm ci`, the `tsc` build, running the compiled entrypoint) were
-  each verified directly and independently, but the Docker layer-copy
-  mechanics themselves are untested. **Run `docker build` yourself and
-  confirm the image starts before deploying it anywhere** — see below.
+- The actual `docker build` — untestable in the sandbox this Dockerfile
+  was written in (no Docker available there) — has since been run for
+  real, on Railway: every build step (`npm ci`, `COPY`, `tsc`, the runtime
+  stage's `npm ci --omit=dev`) completed and the image was pushed
+  successfully. So the build itself is proven; see the next bullet for
+  what wasn't caught by that.
+- **Eighth bug, found by an actual deploy failing:** the image built and
+  started, but Railway's healthcheck against `/health` never succeeded —
+  "1/1 replicas never became healthy." Root cause: most PaaS platforms
+  (Railway included) assign a port dynamically via a `PORT` environment
+  variable and route traffic to *that*, regardless of what a Dockerfile
+  `EXPOSE`s or what a custom-named variable says. `index.ts` only ever
+  read `RELAY_PORT` — never `PORT` — so the app was listening on 8787
+  while Railway was routing to whatever port it had actually assigned.
+  Fixed by making `PORT` take priority when set, with `RELAY_PORT`
+  (unchanged, this project's own name) as the fallback for running it
+  standalone. Verified by starting the compiled binary with `PORT=9999`
+  and confirming it actually listens there instead of on 8787.
 
 ## 1. Build and smoke-test the image locally
 

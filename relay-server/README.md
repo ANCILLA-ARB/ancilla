@@ -159,3 +159,14 @@ npm run relay-server:multi-e2e
    distinction rather than a defect. Fixed by testing the actual
    invariant (never stuck `pending`, never wrongly `confirmed`) instead of
    one specific status label, and documented in both `app.ts` and here.
+7. **Found by an actual deploy, not a test:** the first real Railway
+   deployment built and started the container successfully, then failed
+   its healthcheck entirely — "1/1 replicas never became healthy." Root
+   cause: `index.ts` only ever read `RELAY_PORT`, but Railway (like most
+   PaaS platforms) assigns a port dynamically via a `PORT` environment
+   variable and routes traffic to *that*, ignoring what a Dockerfile
+   `EXPOSE`s or what a custom-named variable says. The app was listening
+   on 8787; Railway was routing to a different port entirely. Fixed by
+   reading `PORT` first when present, falling back to `RELAY_PORT`
+   (unchanged) for running it standalone — see
+   [`DEPLOYMENT.md`](DEPLOYMENT.md).
