@@ -71,6 +71,9 @@
       "fee": 3000,
       "tickSpacing": 60,
       "hooks": "0xCAa8DAB78aa73425eADd87b91f3310cB0e5140C0"
+    },
+    "MockExecutor": {
+      "address": "0xB513256430aCC880b734750BDB552A921a1d6871"
     }
   },
   "_comment": "Single source of truth for what's actually live on Arbitrum Sepolia. Values above verified directly on-chain (not copied from a deploy log) before this file was created. scripts/deploy.ts overwrites the IntentCommitReveal entry on every fresh deploy; scripts/deploy-swap.ts overwrites the TestTokenA/TestTokenB/AncillaSwapPool/SwapExecutor entries on every fresh deploy, without touching IntentCommitReveal; scripts/deploy-treasury.ts overwrites the AncillaTreasuryMultisig entry on every fresh deploy — note that deploying a new multisig here does NOT retroactively wire it into IntentCommitReveal.treasury, since that field is immutable; scripts/deploy-hook.ts overwrites the UniswapV4PoolManager/Create2Factory/AncillaSwapHook/AncillaHookRouter/AncillaLiquidityRouter/AncillaHookPool entries on every fresh deploy, reusing the existing TestTokenA/TestTokenB and wiring treasury straight to the already-deployed AncillaTreasuryMultisig; scripts/demo*.ts read from here instead of each hardcoding their own (previously inconsistent, some stale) copy of the address."
