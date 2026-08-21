@@ -1,6 +1,7 @@
 import { ethers, network } from "hardhat";
 import * as fs from "fs";
 import * as path from "path";
+import { loadTreasuryMultisigDeployment, loadGuardianMultisigDeployment } from "./lib/deployments";
 
 /**
  * Deploys IntentCommitReveal to whatever network Hardhat is pointed at, and
@@ -31,13 +32,16 @@ async function main() {
   // hands out (often as little as 0.005 ETH), so the bond + gas for a full
   // commit-reveal-execute demo cycle comfortably fits. NOT a production value.
   const MIN_BOND = ethers.parseEther("0.001");
-  const treasury = deployer.address; // replace with a real multisig before any real deployment
-  // Same "replace before any real deployment" caveat as treasury above —
-  // a single EOA guardian is documented in IntentCommitReveal.sol's header
-  // as an intentional MVP simplification, not a final design. Pausing only
-  // ever blocks NEW commitIntent calls; reveals/withdrawals/slashing keep
-  // working even while paused, so this can't be used to trap funds.
-  const guardian = deployer.address;
+  // Both pulled from deployments/<network>.json — deploying
+  // AncillaTreasuryMultisig (scripts/deploy-treasury.ts) and
+  // AncillaGuardianMultisig (scripts/deploy-guardian.ts) is required
+  // before this script will run at all. `treasury` and `guardian` are
+  // both `immutable`, set once here and never changeable again, so a
+  // deployment that silently defaulted either back to a single EOA (as
+  // every deployment before this one did) would be a real, not
+  // theoretical, footgun — deliberately not an option.
+  const treasury = loadTreasuryMultisigDeployment(network.name).address;
+  const guardian = loadGuardianMultisigDeployment(network.name).address;
   // 10% of every slashed penalty goes to whoever calls slashNoReveal
   // instead of 100% to treasury — see IntentCommitReveal.sol's header
   // comment ("ECONOMIC HARDENING") for why a permissionless-but-unrewarded

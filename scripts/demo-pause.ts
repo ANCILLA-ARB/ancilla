@@ -19,8 +19,15 @@ import { loadIntentCommitRevealDeployment } from "./lib/deployments";
  *   npx hardhat run scripts/demo-pause.ts --network arbitrumSepolia
  *
  * Requires PRIVATE_KEY in .env, and that wallet to be this deployment's
- * `guardian` (true for the current deployments/arbitrumSepolia.json entry
- * — deploy.ts sets guardian = deployer for now, see its own comment on why).
+ * `guardian` directly (an EOA, not a multisig — this script calls
+ * pause()/unpause() itself, it doesn't go through proposal/confirmation).
+ * NOT true of the current deployments/arbitrumSepolia.json entry anymore
+ * — deploy.ts now wires `guardian` to AncillaGuardianMultisig, so this
+ * script will throw "not this deployment's guardian" against it. Kept
+ * around because it's still correct against any deployment where a
+ * single EOA genuinely is the guardian (e.g. a fresh local deploy). For
+ * the current live deployment, see scripts/demo-guardian-multisig.ts
+ * instead — same proof, plus the multisig's actual M-of-N enforcement.
  */
 
 function explorerTx(hash: string) {

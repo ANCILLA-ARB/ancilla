@@ -83,6 +83,25 @@ export function loadTreasuryMultisigDeployment(networkName: string): TreasuryMul
   return entry as TreasuryMultisigDeployment;
 }
 
+export interface GuardianMultisigDeployment {
+  address: string;
+  owners: string[];
+  threshold: number;
+}
+
+/** Reads the AncillaGuardianMultisig entry written by
+ *  scripts/deploy-guardian.ts. */
+export function loadGuardianMultisigDeployment(networkName: string): GuardianMultisigDeployment {
+  const data = readDeploymentsFile(networkName);
+  const entry = data?.contracts?.AncillaGuardianMultisig;
+  if (!entry?.address) {
+    throw new Error(
+      `deployments/${networkName}.json has no contracts.AncillaGuardianMultisig entry — run \`npx hardhat run scripts/deploy-guardian.ts --network ${networkName}\` first`
+    );
+  }
+  return entry as GuardianMultisigDeployment;
+}
+
 export interface AncillaHookDeployment {
   address: string;
   salt: string;

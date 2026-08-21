@@ -3,7 +3,7 @@
 [![CI](https://github.com/ANCILLA-ARB/ancilla/actions/workflows/ci.yml/badge.svg)](https://github.com/ANCILLA-ARB/ancilla/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Solidity](https://img.shields.io/badge/Solidity-0.8.24-363636?logo=solidity&logoColor=white)](contracts/IntentCommitReveal.sol)
-[![Network](https://img.shields.io/badge/Arbitrum-Sepolia_testnet-28A0F0?logo=arbitrum&logoColor=white)](https://sepolia.arbiscan.io/address/0x78Dd0696FA8f49fc6740857FfC0b8042199aB165)
+[![Network](https://img.shields.io/badge/Arbitrum-Sepolia_testnet-28A0F0?logo=arbitrum&logoColor=white)](https://sepolia.arbiscan.io/address/0x52e7928BD70FcA210B939cd0116EA3F9e043014d)
 
 > *ancilla* (Latin) — a trusted attendant who carries out a task on someone's
 > behalf. That's the whole pitch: a privacy layer for AI agents that act for
@@ -154,8 +154,13 @@ deck.
   deployed `PoolManager` in both swap directions, every rejection path the
   hook is actually supposed to enforce (early/late reveal, hash mismatch,
   wrong token/direction/amount, slippage, replay), and the identical
-  emergency-pause behavior ported from `IntentCommitReveal`. **125 tests
-  total, all passing** (re-run 3x
+  emergency-pause behavior ported from `IntentCommitReveal`, and
+  [`test/AncillaGuardianMultisig.test.ts`](test/AncillaGuardianMultisig.test.ts)
+  — **23 more** covering the M-of-N multisig that now gates pause/unpause
+  on both contracts, including a live-target integration test (a real
+  `IntentCommitReveal` instance actually pausing/unpausing through it, not
+  a mock) and a test proving a single confirmation is provably not enough
+  to execute. **148 tests total, all passing** (re-run 3x
   consecutively to rule out flakiness). 100% statement/line/function
   coverage, 94%+ branch coverage on every core contract except the two v4
   router contracts (`npm run coverage`
@@ -184,7 +189,7 @@ Run it yourself:
 ```bash
 npm install
 npm run compile
-npm test              # 125 tests (46 + 10 relay-server + 20 swap executor + 25 treasury multisig + 24 v4 hook)
+npm test              # 148 tests (46 + 10 relay-server + 20 swap executor + 25 treasury multisig + 24 v4 hook + 23 guardian multisig)
 npm run coverage      # statement/branch/function/line coverage report
 npm run gas-report    # per-function gas cost table
 npm run size          # deployed bytecode size vs the 24KB EIP-170 limit
@@ -238,7 +243,7 @@ npm run size          # deployed bytecode size vs the 24KB EIP-170 limit
   remaining mainnet-readiness items first (see below) and treat a
   professional audit as the final gate before any deployment that holds
   real value, rather than auditing code that's still actively changing.
-  Everything in this repo is self-reviewed in the meantime: 125 unit tests,
+  Everything in this repo is self-reviewed in the meantime: 148 unit tests,
   100% line coverage / 94%+ branch
   coverage on the core contract, three live testnet demos plus a local
   relay-server E2E run, and two deliberate self-attack tests (reentrancy
@@ -275,11 +280,11 @@ something to run against code that's still changing.
 
 | Item | Status |
 |---|---|
-| Treasury as a multisig, not a single EOA | ✅ [`AncillaTreasuryMultisig`](contracts/AncillaTreasuryMultisig.sol) built, 25 tests (including a deliberate reentrancy attack), **proven live on Sepolia** (`npm run demo-treasury:sepolia`) — a withdrawal correctly rejected with 1/2 confirmations, then executed for the exact amount with 2/2. **Not yet wired into a live `IntentCommitReveal`** — needs a fresh `IntentCommitReveal` deployment with `treasury` pointed at it, since the field is immutable. |
-| Emergency pause / circuit breaker | ✅ Both `IntentCommitReveal` and `AncillaSwapHook` now have a guardian-gated pause (OpenZeppelin `Pausable`) scoped to block only *new* commitments — reveals, withdrawals, and slashing keep working while paused, so a pause can never trap an agent's already-locked bond. 7 new tests across both contracts, **proven live on Sepolia** (`npm run demo-pause:sepolia`) — a new commit rejected while paused, and a pre-pause commitment still revealed successfully *while still paused*. `guardian` is a single EOA for now (the deployer) — same documented MVP caveat as the treasury EOA below; replace with a dedicated pause-multisig before any real deployment. |
+| Treasury as a multisig, not a single EOA | ✅ **wired into the live `IntentCommitReveal`, not just deployed standalone.** [`AncillaTreasuryMultisig`](contracts/AncillaTreasuryMultisig.sol), 25 tests (including a deliberate reentrancy attack), **proven live on Sepolia** two ways: a withdrawal correctly rejected with 1/2 confirmations then executed with 2/2 (`npm run demo-treasury:sepolia`), and — against the current deployment specifically — a real slash landing in it as `treasury` (`npm run demo-slasher-reward:sepolia`, see the tx links above). Getting `treasury` from an EOA into this multisig required a full `IntentCommitReveal` redeploy, since the field is `immutable`; `scripts/deploy.ts` now refuses to run at all unless a treasury multisig already exists in `deployments/<network>.json`, closing off the silent-EOA-default path for good. |
+| Emergency pause / circuit breaker | ✅ **guardian is now a 2-of-3 [`AncillaGuardianMultisig`](contracts/AncillaGuardianMultisig.sol), not a single EOA, on the live `IntentCommitReveal`.** Both `IntentCommitReveal` and `AncillaSwapHook` have a guardian-gated pause (OpenZeppelin `Pausable`) scoped to block only *new* commitments — reveals, withdrawals, and slashing keep working while paused, so a pause can never trap an agent's already-locked bond. 23 new tests for the multisig itself (including a live-target integration test and a single-confirmation-must-fail test), **proven live on Sepolia** (`npm run demo-guardian-multisig:sepolia`) — a solo `execute()` attempt with 1 confirmation genuinely reverts, a second independent owner's confirmation is required before pause *or* unpause goes through, and the underlying pause semantics (new commit rejected, pre-pause reveal still works while paused) hold throughout. `AncillaSwapHook`'s `guardian` is still a single EOA — a known, tracked gap; redeploying the hook to fix it also requires re-mining its CREATE2 address and re-initializing its pool/liquidity, deliberately not bundled into this pass. |
 | Economic model hardening (bond/slashing) | 🟡 **partial, by design.** `slashNoReveal` was already permissionless but paid its caller nothing — 100% went to `treasury`, meaning in practice only the operator had any reason to call it. `slasherRewardBps` (10% default) now pays whoever calls it, turning enforcement into a permissionless, profit-driven bounty instead of something that depends on an operator noticing — same pattern as lending-protocol liquidation bounties. **Proven live** (`npm run demo-slasher-reward:sepolia`) — an unrelated third-party wallet earned the exact expected 10% reward, gas-cost-adjusted, for slashing a ghosted commitment. **What's still NOT fixed, and can't be without breaking the protocol's own point:** bond is a flat amount, not scaled to trade notional — at commit time only a hash is on-chain, so the contract can't know (and must not reveal) whether an intent is worth $10 or $1,000,000. For a large enough trade, `minBond` can be smaller than the value an agent gains by walking away (forfeiting the bond) rather than executing an intent that became unprofitable between commit and reveal. This is a structural limitation of flat-bond commit-reveal, not an oversight — see `IntentCommitReveal.sol`'s header comment for the fuller reasoning. |
 | Batching randomness | ⚪️ **deliberately deferred, not started.** `block.timestamp`-based epochs are fine for an MVP; not adversarially hardened against a sequencer biasing timestamps within Ethereum's allowed drift. Fixing this properly means a VRF (e.g. Chainlink VRF) — a real external-oracle dependency, ongoing subscription/LINK cost, and new trust assumptions, for a drift window measured in seconds against an attack that requires an already-compromised or colluding sequencer. Deferring this is a scope call, not an oversight: building VRF integration now, before the items above it, would be solving a smaller, lower-likelihood problem before larger ones — the same "don't build feature theater" reasoning already applied to Phase 4 in the roadmap above. |
-| Relay-server hosting | ✅ **deployed and proven live, publicly, over real HTTPS.** [`relay-server/Dockerfile`](relay-server/Dockerfile) is hosted on Railway; `scripts/relay-server-live-e2e.ts` ran the full commit → HTTP POST → reveal → on-chain-confirm cycle against that real public URL (not a local process) — [commit tx](https://sepolia.arbiscan.io/tx/0x1f4286c0bd0b7f500ce110812aa22b7c53aa72ad1cc4e97412b30ef2a4155342), [reveal tx](https://sepolia.arbiscan.io/tx/0xa830f4107086c9171013df4565fda25f7ef7ff35b0c3e85e3e8d3a0623e4984e). Getting there surfaced and fixed three real deploy-only bugs no test caught: `ethers`/`dotenv` misclassified as dev-only dependencies (would've broken a production-only install), Railway's dynamically-assigned `PORT` not being read (healthcheck failure), and a queue-file `ENOENT` crash on `/reveal` from a directory assumption that only held locally, not inside the Docker image (see [`relay-server/DEPLOYMENT.md`](relay-server/DEPLOYMENT.md) and [`relay-server/README.md`](relay-server/README.md) for the full list). Non-blocking regardless of hosting status: the protocol never depends on the relay — an agent can always call `commitIntent`/`revealIntent` directly. |
+| Relay-server hosting | ✅ **deployed and proven live, publicly, over real HTTPS.** [`relay-server/Dockerfile`](relay-server/Dockerfile) is hosted on Railway; `scripts/relay-server-live-e2e.ts` ran the full commit → HTTP POST → reveal → on-chain-confirm cycle against that real public URL (not a local process) — [commit tx](https://sepolia.arbiscan.io/tx/0x1f4286c0bd0b7f500ce110812aa22b7c53aa72ad1cc4e97412b30ef2a4155342), [reveal tx](https://sepolia.arbiscan.io/tx/0xa830f4107086c9171013df4565fda25f7ef7ff35b0c3e85e3e8d3a0623e4984e). Getting there surfaced and fixed three real deploy-only bugs no test caught: `ethers`/`dotenv` misclassified as dev-only dependencies (would've broken a production-only install), Railway's dynamically-assigned `PORT` not being read (healthcheck failure), and a queue-file `ENOENT` crash on `/reveal` from a directory assumption that only held locally, not inside the Docker image (see [`relay-server/DEPLOYMENT.md`](relay-server/DEPLOYMENT.md) and [`relay-server/README.md`](relay-server/README.md) for the full list). Non-blocking regardless of hosting status: the protocol never depends on the relay — an agent can always call `commitIntent`/`revealIntent` directly. **⚠️ Currently stale:** the hosted Railway instance's `RELAY_CONTRACT_ADDRESS` still points at the *previous* `IntentCommitReveal` deployment (the one used for that live E2E proof), not the current one above — `IntentCommitReveal` was redeployed afterward to wire in the treasury/guardian multisigs (see "Mainnet readiness"). The old deployment still works fine on-chain, so the hosted relay isn't broken, just pointed at a superseded contract; updating Railway's environment variable to the new address is a manual dashboard step, deliberately left to whoever holds that Railway account rather than something an agent should do unilaterally. |
 | Third-party security audit | ⏳ **deliberately deferred to the end, by design** — not skipped, not forgotten. |
 
 ## Deploying to Arbitrum Sepolia (testnet)
@@ -307,12 +312,13 @@ them stale — caught and fixed in a cleanup pass, not before.)
 
 | Contract | Address |
 |---|---|
-| `IntentCommitReveal` (relay support, bond locking, emergency pause) | [`0x78Dd0696FA8f49fc6740857FfC0b8042199aB165`](https://sepolia.arbiscan.io/address/0x78Dd0696FA8f49fc6740857FfC0b8042199aB165) |
+| `IntentCommitReveal` (relay support, bond locking, emergency pause) | [`0x52e7928BD70FcA210B939cd0116EA3F9e043014d`](https://sepolia.arbiscan.io/address/0x52e7928BD70FcA210B939cd0116EA3F9e043014d) |
 | `TestTokenA` (aUSD, mintable test ERC20) | [`0xCf7fC3b5A96cc8ef46D558fB455B63ec862ba977`](https://sepolia.arbiscan.io/address/0xCf7fC3b5A96cc8ef46D558fB455B63ec862ba977) |
 | `TestTokenB` (aETH, mintable test ERC20) | [`0x9487f45a0fEf6C96d1571Ae7B32f020995710f73`](https://sepolia.arbiscan.io/address/0x9487f45a0fEf6C96d1571Ae7B32f020995710f73) |
 | `AncillaSwapPool` (constant-product AMM, aUSD/aETH) | [`0x3663a10bB68cEbe477843673385d5D97ea12cb0b`](https://sepolia.arbiscan.io/address/0x3663a10bB68cEbe477843673385d5D97ea12cb0b) |
 | `SwapExecutor` (real `IIntentExecutor`) | [`0x10896dDf2e5D5E9fbc2Eb3dd2C65719A86aaDc76`](https://sepolia.arbiscan.io/address/0x10896dDf2e5D5E9fbc2Eb3dd2C65719A86aaDc76) |
-| `AncillaTreasuryMultisig` (2-of-3, see "Mainnet readiness") | [`0xC5d4f69B53520DC5a625BA8197176E053C845800`](https://sepolia.arbiscan.io/address/0xC5d4f69B53520DC5a625BA8197176E053C845800) |
+| `AncillaTreasuryMultisig` (2-of-3, now actually wired into `IntentCommitReveal.treasury` above — see "Mainnet readiness") | [`0xC5d4f69B53520DC5a625BA8197176E053C845800`](https://sepolia.arbiscan.io/address/0xC5d4f69B53520DC5a625BA8197176E053C845800) |
+| `AncillaGuardianMultisig` (2-of-3, wired into `IntentCommitReveal.guardian` above — see "Mainnet readiness") | [`0x26E1A66E96296125c5C04fB90c64D167e27694c1`](https://sepolia.arbiscan.io/address/0x26E1A66E96296125c5C04fB90c64D167e27694c1) |
 | `AncillaSwapHook` ("Option A" v4 architecture, emergency pause) | [`0xCAa8DAB78aa73425eADd87b91f3310cB0e5140C0`](https://sepolia.arbiscan.io/address/0xCAa8DAB78aa73425eADd87b91f3310cB0e5140C0) |
 | `AncillaHookRouter` | [`0x7FD0cDD9694bF7460E758144610d14fb5E21c4e6`](https://sepolia.arbiscan.io/address/0x7FD0cDD9694bF7460E758144610d14fb5E21c4e6) |
 | `AncillaLiquidityRouter` | [`0xDfDa97d9d7Dd0e17324a2BD1913dd28d43486d7E`](https://sepolia.arbiscan.io/address/0xDfDa97d9d7Dd0e17324a2BD1913dd28d43486d7E) |
@@ -320,19 +326,26 @@ them stale — caught and fixed in a cleanup pass, not before.)
 
 `IntentCommitReveal` deployed with `commitWindowSeconds=120`,
 `revealDelaySeconds=30`, `revealWindowSeconds=120`, `minBond=0.001 ETH`,
-`treasury`/`guardian` both currently the deployer EOA, `slasherRewardBps=1000`
-(10%, see "Mainnet readiness" below for the full economic-hardening
-writeup — replacing `treasury`/`guardian` with dedicated governance before
-any real deployment is a known, tracked gap, not an oversight). Source is
+`treasury=AncillaTreasuryMultisig` (2-of-3), `guardian=AncillaGuardianMultisig`
+(2-of-3), `slasherRewardBps=1000` (10%, see "Mainnet readiness" below for
+the full economic-hardening writeup). Both governance addresses above are
+now real multisigs, not EOAs — `scripts/deploy.ts` itself enforces this:
+it reads both from `deployments/arbitrumSepolia.json` and throws rather
+than silently falling back to `deployer.address` if either multisig
+hasn't been deployed first. `AncillaSwapHook`'s `guardian` is still a
+single EOA as of this deployment — a known, tracked gap, not an oversight
+(redeploying the hook also requires re-mining its CREATE2 address and
+re-initializing its pool/liquidity, deliberately not bundled into this
+pass). Source is
 not yet verified on Arbiscan (no API key configured) — the contract works regardless, just without human-readable
 source in the explorer UI. Verify it yourself with
 `npx hardhat verify --network arbitrumSepolia <address> 120 30 120 1000000000000000 <treasury> <guardian> 1000`
 once you set `ARBISCAN_API_KEY` in `.env`.
 
-This is the **fifth** deployment of `IntentCommitReveal` and the **third**
-of `AncillaSwapHook` — both redeployed again to add the `slasherRewardBps`
-constructor parameter (another interface change, same reason as the
-guardian redeploy before it). Being precise about what's actually been
+This is the **sixth** deployment of `IntentCommitReveal` — redeployed
+again to wire `treasury`/`guardian` to the two multisigs above instead of
+a single EOA — and the **third** of `AncillaSwapHook` (unchanged this
+round). Being precise about what's actually been
 re-proven against *these exact* addresses, instead of implying everything
 carried over automatically just because the source code did:
 
@@ -342,11 +355,13 @@ carried over automatically just because the source code did:
   a completely unrelated second wallet calls `slashNoReveal` and is paid
   a real reward for doing so, instead of the whole penalty vanishing into
   the treasury with nothing in it for whoever bothered to enforce the
-  rule. Verified independently, gas-cost-adjusted: treasury received
-  exactly 90% of the `0.001 ETH` penalty, the slasher's balance increased
-  by exactly the other 10% net of its own gas cost. Example tx:
-  [commit (the ghosted intent)](https://sepolia.arbiscan.io/tx/0xa259c136164250c95a5ad26503a33ec273b55d4011ce311e05316ac768c331fa),
-  [slashNoReveal (called by the unrelated wallet)](https://sepolia.arbiscan.io/tx/0x3fd3f01711baf22a2577cd2c2608eb410416888a5bbcfb12eb47201e71905abe).
+  rule. Re-verified independently against **this exact deployment**,
+  gas-cost-adjusted: `AncillaTreasuryMultisig` — a real multisig contract
+  now, not an EOA — received exactly 90% of the `0.001 ETH` penalty, the
+  slasher's balance increased by exactly the other 10% net of its own gas
+  cost. Example tx:
+  [commit (the ghosted intent)](https://sepolia.arbiscan.io/tx/0xe84be7682ae52d920510be44dbcefcae749ce158204eebc31508522f623c1c71),
+  [slashNoReveal (called by the unrelated wallet)](https://sepolia.arbiscan.io/tx/0x81e6a93ac683cdeb930d0f54d7bf453e81ac9b60ec7a5ab24e772e12d65545cd).
   See "Mainnet readiness" below for the full writeup, including what this
   does *not* fix.
 - **Real swap execution** (`npm run demo-swap:sepolia`,
@@ -379,15 +394,26 @@ carried over automatically just because the source code did:
   [commit](https://sepolia.arbiscan.io/tx/0xd530a738b5c59d18ce3708e653b6680530188167007d86c0956f638909747971),
   [reveal-and-swap](https://sepolia.arbiscan.io/tx/0xadf46f154e782aa089357dd5beb2c8f87707a6b6f3736da8baa3c5fc62f837fd).
   See "Uniswap v4 hook architecture" below for the full design writeup.
-- **Emergency pause** (`npm run demo-pause:sepolia`, [`scripts/demo-pause.ts`](scripts/demo-pause.ts))
-  — re-verified live against **this exact deployment**, proving both
-  halves of the design in one run: a brand-new `commitIntent()` correctly
-  reverts once paused, **and** a commitment made *before* the pause can
-  still be revealed successfully *while still paused* — pausing blocks
-  new exposure, it never traps an agent's already-locked bond. Example
-  tx: [pause](https://sepolia.arbiscan.io/tx/0xd2a8065f203baadf7f3ef55a3f853bdd3542f4632f35ec26761246c48838cf3c),
-  [reveal while still paused](https://sepolia.arbiscan.io/tx/0x011e5d173ff78190fa8ab1b778fe87310e5b4543342e392715acb5d08bce1460),
-  [unpause](https://sepolia.arbiscan.io/tx/0x3f7ede4ecf150791a88eea055ae136d7e89bb765db8620e23ec90198eb06423f).
+- **Emergency pause, now governed by a 2-of-3 multisig instead of a
+  single EOA** (`npm run demo-guardian-multisig:sepolia`,
+  [`scripts/demo-guardian-multisig.ts`](scripts/demo-guardian-multisig.ts))
+  — proves both the pause mechanism itself (a brand-new `commitIntent()`
+  correctly reverts once paused; a commitment made *before* the pause can
+  still be revealed successfully *while still paused*) **and** the actual
+  security upgrade that motivated replacing the EOA: one owner proposing
+  a pause is not enough — a solo `execute()` attempt with only 1
+  confirmation genuinely reverts on-chain, and only goes through once a
+  second, independent owner also confirms. Same governance flow proven
+  again for `unpause()`. Example tx:
+  [propose (owner A)](https://sepolia.arbiscan.io/tx/0x3939cd2b7b2996c06d87fce545ef31cf3d553d77f966b51799694b122255ce35),
+  [confirm (owner B)](https://sepolia.arbiscan.io/tx/0x2f09d55b7139b116e4bb1ef8c801f0da6eeb50e7edc28556b77a366a6fc6d34a),
+  [execute pause](https://sepolia.arbiscan.io/tx/0x8fb353462938d3fdd94f31217982899e52de4c9cebeb5c0ef6c42b9aee7edfd3),
+  [reveal while still paused](https://sepolia.arbiscan.io/tx/0x92bdc84b49f1b0b6fa9314340d841dcb676e93270defd2d5f4c6bbf4a375afcb),
+  [unpause execute](https://sepolia.arbiscan.io/tx/0x477fe55fb4e6d131fb47edefbb3457c577085eaa617304efa5142dd56cdf3225).
+  [`scripts/demo-pause.ts`](scripts/demo-pause.ts) still exists and still
+  passes against any deployment where a single EOA genuinely is the
+  guardian (e.g. a fresh local deploy) — it just no longer applies to
+  *this* deployment now that `guardian` is a multisig.
   `AncillaSwapHook` has the identical mechanism — proven there via its own
   local test suite rather than a second live script, since it's the same
   standard logic in both places.
@@ -400,10 +426,10 @@ carried over automatically just because the source code did:
   `executeWithdrawal` **reverts with only 1 of 2 required confirmations**,
   then confirmed from a second owner and executed — the exact proposed
   amount moved, verified by balance delta, not by trusting the return
-  value. Note the scope: this proves the multisig contract itself works
-  correctly live; it does **not** mean the currently-live
-  `IntentCommitReveal`'s `treasury` field points at it — that field is
-  still the deployer EOA (see "Mainnet readiness").
+  value. This proves the multisig contract itself works correctly live;
+  the current `IntentCommitReveal`'s `treasury` field is also now
+  genuinely pointed at it — see the slasher-reward tx links above and
+  "Mainnet readiness" below for that separate proof.
 - **Bond locking** (`npm run demo-bond-lock:sepolia`, `scripts/demo-bond-lock.ts`)
   — re-verified live against **this exact deployment**. Commits an intent,
   then immediately attempts to withdraw the full bond. Confirmed on-chain
@@ -767,7 +793,7 @@ checks rather than relying on manual review alone:
 
 | Command | What it shows |
 |---|---|
-| `npm test` | 125 tests, run 3x consecutively during development to rule out flakiness |
+| `npm test` | 148 tests, run 3x consecutively during development to rule out flakiness |
 | `npm run coverage` | Istanbul/solidity-coverage report — 100% statements/lines/functions across every contract, 94-100% branches on each core contract (`IntentCommitReveal` 94.74%, `AncillaSwapPool` 94.12%, `AncillaTreasuryMultisig` 95.45%, `SwapExecutor` 100%, `AncillaSwapHook` 72%). The `ecrecover`-returns-zero-address branch, once (wrongly) written off here as "impractical to force deliberately," turned out not to be — a signature with `r=0` (not a valid secp256k1 x-coordinate) reliably makes `ecrecover` return the zero address, and is now an actual test. What's left uncovered is genuinely dead by design: defensive fallback code in `slashNoReveal` that the bond-locking fix made intentionally unreachable, `AncillaSwapPool.swap()`'s own equivalent guard, which the AMM formula's own math makes unreachable (see "Sixth" bug), and — honestly, not yet chased down — some delta-sign edge branches in `AncillaHookRouter`/`AncillaLiquidityRouter` (e.g. a swap that moves zero of one currency) that every test so far happens not to hit. |
 | `npm run gas-report` | Per-function gas cost table (e.g. `commitIntent` ~78–95k gas, `revealIntentViaRelay` ~52k gas) |
 | `npm run size` | Deployed bytecode size — `IntentCommitReveal` is 7.10 KiB, `AncillaSwapHook` 6.24 KiB, `AncillaSwapPool` 2.14 KiB, `AncillaTreasuryMultisig` 2.26 KiB, `AncillaHookRouter` 2.77 KiB, `AncillaLiquidityRouter` 2.28 KiB, `SwapExecutor` 1.23 KiB — all well under the 24 KiB EIP-170 limit Arbitrum also enforces (Uniswap's own `PoolManager`, at ~19.3 KiB, is the one contract in this stack close to that ceiling — and it isn't ours; it's already deployed and live) |
