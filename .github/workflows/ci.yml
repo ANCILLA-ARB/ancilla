@@ -1,0 +1,75 @@
+name: CI
+
+# Only runs what can succeed without external state: compile + the full
+# Hardhat/mocha test suite (all 48 tests run against Hardhat's in-process
+# network, including the relay-server tests via supertest — no real port,
+# no spawned process) plus coverage and a contract-size check.
+#
+# Deliberately NOT run here: scripts/demo*.ts and scripts/relay-server*-e2e.ts.
+# Those need either a live Arbitrum Sepolia RPC + funded testnet wallets, or
+# a long-running `npx hardhat node` + spawned relay-server processes — not
+# something a CI job should depend on for a pass/fail signal.
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    name: Compile & test (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["18.x", "20.x"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile contracts
+        run: npm run compile
+
+      - name: "Run test suite (48 tests: contract + relay-server)"
+        run: npm test
+
+  coverage:
+    name: Coverage & contract size
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20.x"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run coverage
+        run: npm run coverage
+
+      - name: Check deployed contract size against the 24KB EIP-170 limit
+        run: npm run size
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 14

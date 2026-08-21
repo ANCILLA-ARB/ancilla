@@ -1,0 +1,15 @@
+{
+  "network": "arbitrumSepolia",
+  "chainId": 421614,
+  "contracts": {
+    "IntentCommitReveal": {
+      "address": "0xb2a513260DA2e61490386B3BE1773DB99d5a91f3",
+      "commitWindowSeconds": 120,
+      "revealDelaySeconds": 30,
+      "revealWindowSeconds": 120,
+      "minBond": "1000000000000000",
+      "treasury": "0x5d01654edC4C618947e054E541b1937b7D165975"
+    }
+  },
+  "_comment": "Single source of truth for what's actually live on Arbitrum Sepolia. Values above verified directly on-chain (not copied from a deploy log) before this file was created. scripts/deploy.ts overwrites the IntentCommitReveal entry on every fresh deploy; scripts/demo*.ts read from here instead of each hardcoding their own (previously inconsistent, some stale) copy of the address."
+}
