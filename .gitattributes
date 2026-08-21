@@ -1,0 +1,12 @@
+# Normalize all text files to LF in the repository itself, regardless of
+# what any given contributor's local core.autocrlf setting does on
+# checkout/commit. The repo's stored content was already consistently LF
+# throughout (verified directly against git's stored blobs, not assumed)
+# — this makes that explicit instead of relying on each contributor's own
+# git config, and stops the "LF will be replaced by CRLF" warnings Windows
+# checkouts otherwise print on every commit.
+* text=auto eol=lf
+
+# Solidity syntax highlighting fallback for tools that don't already know
+# the extension (GitHub itself does).
+*.sol linguist-language=Solidity
