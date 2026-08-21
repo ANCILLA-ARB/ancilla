@@ -61,3 +61,67 @@ export function loadSwapStackDeployment(networkName: string): SwapStackDeploymen
     executor: SwapExecutor.address,
   };
 }
+
+export interface TreasuryMultisigDeployment {
+  address: string;
+  owners: string[];
+  threshold: number;
+}
+
+/** Reads the AncillaTreasuryMultisig entry written by
+ *  scripts/deploy-treasury.ts. */
+export function loadTreasuryMultisigDeployment(networkName: string): TreasuryMultisigDeployment {
+  const data = readDeploymentsFile(networkName);
+  const entry = data?.contracts?.AncillaTreasuryMultisig;
+  if (!entry?.address) {
+    throw new Error(
+      `deployments/${networkName}.json has no contracts.AncillaTreasuryMultisig entry — run \`npx hardhat run scripts/deploy-treasury.ts --network ${networkName}\` first`
+    );
+  }
+  return entry as TreasuryMultisigDeployment;
+}
+
+export interface AncillaHookDeployment {
+  address: string;
+  salt: string;
+  poolManager: string;
+  commitWindowSeconds: number;
+  revealDelaySeconds: number;
+  revealWindowSeconds: number;
+  minBond: string;
+  treasury: string;
+}
+
+export interface AncillaHookPoolKey {
+  currency0: string;
+  currency1: string;
+  fee: number;
+  tickSpacing: number;
+  hooks: string;
+}
+
+/** Reads the AncillaSwapHook/AncillaHookRouter/AncillaLiquidityRouter/
+ *  AncillaHookPool entries written by scripts/deploy-hook.ts. */
+export function loadHookDeployment(networkName: string): {
+  poolManager: string;
+  hook: AncillaHookDeployment;
+  router: string;
+  liquidityRouter: string;
+  poolKey: AncillaHookPoolKey;
+} {
+  const data = readDeploymentsFile(networkName);
+  const { UniswapV4PoolManager, AncillaSwapHook, AncillaHookRouter, AncillaLiquidityRouter, AncillaHookPool } =
+    data?.contracts || {};
+  if (!AncillaSwapHook?.address || !AncillaHookRouter?.address || !AncillaHookPool) {
+    throw new Error(
+      `deployments/${networkName}.json is missing the v4 hook stack — run \`npx hardhat run scripts/deploy-hook.ts --network ${networkName}\` first`
+    );
+  }
+  return {
+    poolManager: UniswapV4PoolManager.address,
+    hook: AncillaSwapHook,
+    router: AncillaHookRouter.address,
+    liquidityRouter: AncillaLiquidityRouter.address,
+    poolKey: AncillaHookPool,
+  };
+}

@@ -18,6 +18,8 @@
     "demo-bond-lock:sepolia": "hardhat run scripts/demo-bond-lock.ts --network arbitrumSepolia",
     "demo-swap:sepolia": "hardhat run scripts/demo-swap.ts --network arbitrumSepolia",
     "demo-treasury:sepolia": "hardhat run scripts/demo-treasury.ts --network arbitrumSepolia",
+    "deploy-hook:sepolia": "hardhat run scripts/deploy-hook.ts --network arbitrumSepolia",
+    "demo-hook-swap:sepolia": "hardhat run scripts/demo-hook-swap.ts --network arbitrumSepolia",
     "relay-server": "ts-node relay-server/index.ts",
     "relay-server:e2e": "ts-node scripts/relay-server-e2e.ts",
     "relay-server:multi-e2e": "ts-node scripts/relay-server-multi-e2e.ts"
@@ -30,7 +32,9 @@
     "ai-agent",
     "eip-712",
     "amm",
-    "defi"
+    "defi",
+    "uniswap-v4",
+    "hooks"
   ],
   "author": "",
   "license": "MIT",
@@ -57,12 +61,15 @@
     "dotenv": "^17.4.2",
     "hardhat": "^2.29.1",
     "hardhat-contract-sizer": "^2.10.1",
+    "solmate": "^6.8.0",
     "supertest": "^7.2.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.6.3"
   },
   "dependencies": {
     "@openzeppelin/contracts": "^5.6.1",
+    "@uniswap/v4-core": "^1.0.2",
+    "@uniswap/v4-periphery": "^1.0.3",
     "express": "^5.2.1"
   }
 }

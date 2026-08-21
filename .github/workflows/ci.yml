@@ -1,7 +1,7 @@
 name: CI
 
 # Only runs what can succeed without external state: compile + the full
-# Hardhat/mocha test suite (all 93 tests run against Hardhat's in-process
+# Hardhat/mocha test suite (all 114 tests run against Hardhat's in-process
 # network, including the relay-server tests via supertest — no real port,
 # no spawned process) plus coverage and a contract-size check.
 #
@@ -41,7 +41,7 @@ jobs:
       - name: Compile contracts
         run: npm run compile
 
-      - name: "Run test suite (93 tests: contract + relay-server)"
+      - name: "Run test suite (114 tests: contract + relay-server)"
         run: npm test
 
   coverage:

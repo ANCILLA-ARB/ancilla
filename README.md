@@ -23,6 +23,7 @@ deck.
 - [Roadmap](#roadmap-from-the-earlier-discussion-for-context)
 - [Mainnet readiness](#mainnet-readiness) — what's done, what isn't, before this touches real value
 - [Deploying to Arbitrum Sepolia](#deploying-to-arbitrum-sepolia-testnet)
+- [Uniswap v4 hook architecture](#uniswap-v4-hook-architecture-option-a) — a second, parallel architecture gating a real Uniswap v4 pool instead of the standalone AMM, proven live
 - [Contract parameters explained](#contract-parameters-explained)
 - [Bugs we hit and fixed](#a-real-bug-we-hit-and-fixed-kept-here-on-purpose-not-swept-under-the-rug) — 6 real ones, kept on the record, not cleaned up out of the story
 - [Project quality tooling](#project-quality-tooling) — coverage, gas, CI
@@ -75,6 +76,14 @@ deck.
   an EOA; the currently-live `IntentCommitReveal` above still uses an EOA
   treasury, unchanged, since `treasury` can't be edited after deployment.
   See "Mainnet readiness" below.
+- **[`contracts/AncillaSwapHook.sol`](contracts/AncillaSwapHook.sol)** — a
+  second, parallel architecture ("Option A"): a real Uniswap v4 hook that
+  absorbs commit-reveal entirely, gating access to a genuine Uniswap v4
+  pool instead of the standalone `AncillaSwapPool`. `IntentCommitReveal` is
+  untouched by this — it's a parallel path, not a replacement. **Proven
+  live on Arbitrum Sepolia**, against Uniswap's actual, already-deployed
+  `PoolManager` — see "Uniswap v4 hook architecture" below for the full
+  design writeup, and "Currently live" for addresses and tx proof.
 - [`sdk/intent.ts`](sdk/intent.ts) — the off-chain helper an agent operator
   calls to build a commitment (hash) before submitting `commitIntent()`.
 - **`revealIntentViaRelay(...)` and `commitIntentViaRelay(...)`** in the same
@@ -113,10 +122,17 @@ deck.
   propose/confirm/revoke/execute lifecycle, threshold enforcement, a
   failed-transfer case that proves a bad withdrawal reverts fully instead
   of getting stuck half-executed, and a deliberate reentrancy attack from
-  a malicious withdrawal recipient that is also a listed owner. **93 tests
+  a malicious withdrawal recipient that is also a listed owner, and
+  [`test/AncillaSwapHook.test.ts`](test/AncillaSwapHook.test.ts) — **21
+  more** covering the v4 hook stack: mining a real CREATE2 hook address,
+  bonding, a full commit → reveal-and-swap cycle against a real locally
+  deployed `PoolManager` in both swap directions, and every rejection path
+  the hook is actually supposed to enforce (early/late reveal, hash
+  mismatch, wrong token/direction/amount, slippage, replay). **114 tests
   total, all passing** (re-run 3x
   consecutively to rule out flakiness). 100% statement/line/function
-  coverage, 94%+ branch coverage on every core contract (`npm run coverage`
+  coverage, 94%+ branch coverage on every core contract except the two v4
+  router contracts (`npm run coverage`
   — remaining gaps are documented, not hidden — see "Bugs we hit and
   fixed"). Covers: constructor input validation, bond requirement and
   bond-locking (see "Third bug"
@@ -142,7 +158,7 @@ Run it yourself:
 ```bash
 npm install
 npm run compile
-npm test              # 93 tests (38 + 10 relay-server + 20 swap executor + 25 treasury multisig)
+npm test              # 114 tests (38 + 10 relay-server + 20 swap executor + 25 treasury multisig + 21 v4 hook)
 npm run coverage      # statement/branch/function/line coverage report
 npm run gas-report    # per-function gas cost table
 npm run size          # deployed bytecode size vs the 24KB EIP-170 limit
@@ -271,6 +287,10 @@ them stale — caught and fixed in a cleanup pass, not before.)
 | `AncillaSwapPool` (constant-product AMM, aUSD/aETH) | [`0x3663a10bB68cEbe477843673385d5D97ea12cb0b`](https://sepolia.arbiscan.io/address/0x3663a10bB68cEbe477843673385d5D97ea12cb0b) |
 | `SwapExecutor` (real `IIntentExecutor`) | [`0x10896dDf2e5D5E9fbc2Eb3dd2C65719A86aaDc76`](https://sepolia.arbiscan.io/address/0x10896dDf2e5D5E9fbc2Eb3dd2C65719A86aaDc76) |
 | `AncillaTreasuryMultisig` (2-of-3, see "Mainnet readiness") | [`0xC5d4f69B53520DC5a625BA8197176E053C845800`](https://sepolia.arbiscan.io/address/0xC5d4f69B53520DC5a625BA8197176E053C845800) |
+| `AncillaSwapHook` ("Option A" v4 architecture) | [`0x1241d7ca96122A679A47E2004B5b2EDD90B040C0`](https://sepolia.arbiscan.io/address/0x1241d7ca96122A679A47E2004B5b2EDD90B040C0) |
+| `AncillaHookRouter` | [`0x2CA93f517B079d63d3EbAc8634292EE0046c2Cb8`](https://sepolia.arbiscan.io/address/0x2CA93f517B079d63d3EbAc8634292EE0046c2Cb8) |
+| `AncillaLiquidityRouter` | [`0xE458c47Fd7a3A145302b3C85B1047F3a4FB31d67`](https://sepolia.arbiscan.io/address/0xE458c47Fd7a3A145302b3C85B1047F3a4FB31d67) |
+| Uniswap v4 `PoolManager` (Uniswap's, not ours) | [`0xFB3e0C6F74eB1a21CC1Da29aeC80D2Dfe6C9a317`](https://sepolia.arbiscan.io/address/0xFB3e0C6F74eB1a21CC1Da29aeC80D2Dfe6C9a317) |
 
 Deployed with `commitWindowSeconds=120`, `revealDelaySeconds=30`,
 `revealWindowSeconds=120`, `minBond=0.001 ETH`. Source is not yet verified on
@@ -304,6 +324,26 @@ partway through this session, and topping up requires a manual faucet claim
   [reveal + real swap](https://sepolia.arbiscan.io/tx/0x58c076f8f5b52791b33311cc689efc7b266da529a131551e6733118110c53111).
   This closes what was, until now, the single biggest gap between "tested
   locally" and "the project's actual core narrative, proven live."
+- **The v4 hook stack** (`npm run deploy-hook:sepolia`,
+  `npm run demo-hook-swap:sepolia`, [`scripts/demo-hook-swap.ts`](scripts/demo-hook-swap.ts))
+  — verified live against Uniswap's real, already-deployed `PoolManager`
+  above, not a locally-deployed stand-in. Agent bonds, commits an intent,
+  waits out the real batch window, then calls `AncillaHookRouter.revealAndSwap`
+  — a single transaction in which `AncillaSwapHook`'s `beforeSwap` verifies
+  the hash commitment, the timing window, and that the swap's real
+  token/direction/amount match what was committed to, the real v4 swap
+  then executes against real pooled liquidity, and `afterSwap` enforces
+  the committed `minAmountOut` against the actual output. Verified
+  independently afterward via balance **delta** (the demo wallet is reused
+  across scripts, so it already held tokens from an earlier run — an
+  absolute-zero-balance assertion would have been the wrong check, and an
+  earlier version of this script's own verification logic got exactly
+  that wrong before being fixed): exactly the committed `amountIn` moved
+  out, output balance increased, `commitments(commitId).revealed` flipped
+  true, one `IntentSwapExecuted` event. Example tx:
+  [commit](https://sepolia.arbiscan.io/tx/0x846207824ba332aceb219775b47952c6752e8ec56c8b5fef7413b6d1e74ebdfa),
+  [reveal-and-swap](https://sepolia.arbiscan.io/tx/0x5680e27125dac9025c41d9123887e13b2b2ab3d2270b1d08d2c002f8eb24972f).
+  See "Uniswap v4 hook architecture" below for the full design writeup.
 - **Treasury multisig** (`npm run demo-treasury:sepolia`,
   [`scripts/demo-treasury.ts`](scripts/demo-treasury.ts)) — verified live
   against the `AncillaTreasuryMultisig` deployment above (owners: the
@@ -333,6 +373,113 @@ partway through this session, and topping up requires a manual faucet claim
   *this* exact deployment address — that's a known gap, not a hidden one.
   Re-running `npm run demo:sepolia` and `npm run demo-relay:sepolia` against
   `0xb2a51326...5a91f3` once the demo wallets are topped up would close it.
+
+## Uniswap v4 hook architecture ("Option A")
+
+`AncillaSwapPool` proves the core narrative end-to-end, but it's a
+standalone toy AMM — whatever liquidity it has is whatever got manually
+seeded into it. Nobody parks real capital in a brand-new project's own
+pool. This section documents a second, parallel architecture built to
+close that gap: instead of Ancilla running its own AMM, a Uniswap v4 hook
+gates access to a **real** v4 pool. This was a deliberate design
+discussion (see the project's dossier for the original diagram-and-critique
+exchange it came out of) — two options were on the table, and one was
+chosen and built:
+
+- **Option A (chosen, built)** — the hook absorbs commit-reveal entirely,
+  replacing the separate reveal step with a single "reveal-and-swap"
+  transaction. This is what's live today.
+- **Option B (not built)** — a thinner hook that calls back into the
+  existing, unmodified `IntentCommitReveal` to check a commitment was
+  validly revealed, rather than reimplementing commit-reveal inside the
+  hook itself. Documented here so the tradeoff is on the record, not
+  because it's still an open question — Option A is what got built.
+
+### How it actually works
+
+There is no separate `revealIntent()` call in this architecture. Reveal
+and execution are the same transaction:
+
+1. Agent bonds and commits, same as `IntentCommitReveal`
+   (`AncillaSwapHook.commitIntent`) — only the hash is on-chain.
+2. Once the batch window opens, the agent calls
+   `AncillaHookRouter.revealAndSwap(key, params, commitId, intentData, salt)`.
+   The router calls Uniswap's real `PoolManager.unlock()`/`swap()` — v4's
+   flash-accounting entrypoint — with `intentData`/`salt` attached as
+   `hookData`.
+3. Inside that same transaction, `AncillaSwapHook._beforeSwap` decodes
+   `hookData`, verifies the hash commitment, verifies the reveal window is
+   open, and — critically — verifies the swap actually being submitted
+   (token, direction, exact amount) matches what was committed to, so a
+   valid hash can't be reused to ride along with a different swap.
+4. The real v4 swap executes against real pooled liquidity.
+5. `AncillaSwapHook._afterSwap` checks the real, executed output against
+   the committed `minAmountOut` and reverts the *entire* transaction if it
+   falls short — so a bad swap doesn't leave the commitment consumed with
+   nothing to show for it — then emits `IntentSwapExecuted`.
+
+### Why two more small router contracts exist
+
+Uniswap v4's `PoolManager.swap()`/`modifyLiquidity()` can only be called
+from inside an `unlock()` callback (flash accounting — deltas are settled
+at the end, not per-call). `AncillaHookRouter` (agent-facing swaps) and
+`AncillaLiquidityRouter` (operator liquidity seeding) exist to do that
+unlock/callback/settle dance. Both are deliberately **not** built on
+Uniswap's own `PoolSwapTest`/`PoolModifyLiquidityTest` (official, but
+`UNLICENSED` and explicitly test-only) or `v4-periphery`'s `V4Router`
+(pinned to an exact `pragma solidity 0.8.26`, one version ahead of
+everything else in this repo). Writing them ourselves — small, MIT,
+0.8.24, fully tested — keeps every contract this repo actually deploys
+self-authored and directly reasoned about, same philosophy as
+`AncillaTreasuryMultisig`. `Create2Factory` exists for the same
+self-authored-over-borrowed reason: v4 hook addresses must be mined so
+their low bits encode the hook's permission flags (`beforeSwap`,
+`afterSwap`), which needs a known, fixed CREATE2 deployer to mine a salt
+against — done in TypeScript
+([`scripts/lib/hookMiner.ts`](scripts/lib/hookMiner.ts), a port of
+`v4-periphery`'s own `HookMiner.sol` algorithm) rather than thousands of
+on-chain calls.
+
+### Licensing, checked before writing a line of code
+
+Uniswap v4 ships across multiple packages with different licenses, so
+this was verified per-file before depending on any of it, not assumed:
+
+| Package/file | License | Used here as |
+|---|---|---|
+| `@uniswap/v4-core`'s interfaces/types/libraries (`IPoolManager`, `Hooks`, `PoolKey`, `BalanceDelta`, …) | MIT | direct imports in `AncillaSwapHook`/the routers |
+| `@uniswap/v4-core`'s `PoolManager.sol` itself | **BUSL-1.1** | never deployed by this repo — the real one is already live on Arbitrum, deployed and operated by Uniswap; only used *locally*, in Hardhat tests, to have something real to test against |
+| `@uniswap/v4-periphery`'s `BaseHook`/`HookMiner`/`LiquidityAmounts` | MIT | direct imports (hook base contract, mining algorithm reference, liquidity math) |
+| `@uniswap/v4-core`'s test utilities (`PoolSwapTest`, `PoolModifyLiquidityTest`) | **UNLICENSED** | **not used anywhere in this repo**, including local tests — see "why two more small router contracts exist" above |
+| `solmate` (a transitive dependency of `PoolManager.sol`) | AGPL-3.0-only | dev-only, needed purely to *compile* `PoolManager` for local testing; never deployed by this repo to any real network |
+
+### Verified facts this section relies on (not assumed)
+
+- Uniswap v4 `PoolManager` is live on Arbitrum Sepolia at
+  [`0xFB3e0C6F74eB1a21CC1Da29aeC80D2Dfe6C9a317`](https://sepolia.arbiscan.io/address/0xFB3e0C6F74eB1a21CC1Da29aeC80D2Dfe6C9a317)
+  and on Arbitrum One (mainnet) at
+  [`0x360e68faccca8ca495c1b759fd9eee466db9fb32`](https://arbiscan.io/address/0x360E68faCcca8cA495c1B759Fd9EEe466db9FB32)
+  — confirmed via
+  [docs.uniswap.org/contracts/v4/deployments](https://docs.uniswap.org/contracts/v4/deployments),
+  not inferred.
+- `PoolManager`'s flash accounting uses EIP-1153 transient storage
+  (`TSTORE`/`TLOAD`), a Cancun-hardfork opcode — Hardhat's compiler and
+  local network are both explicitly configured for `evmVersion: "cancun"`
+  in [`hardhat.config.ts`](hardhat.config.ts) because of this (the default,
+  "paris", doesn't support it). Arbitrum itself already supports it in
+  production — that's *why* the real `PoolManager` above works there at
+  all.
+
+### What this does NOT change
+
+Same caveats as `IntentCommitReveal` apply identically here — this doesn't
+hide anything from the Arbitrum sequencer, isn't a ZK system, and the
+batching window is still `block.timestamp` math, not a VRF. One
+additional, deliberate gap specific to this architecture: **EIP-712
+relayed commit/reveal (Phase 3 in `IntentCommitReveal`) has not been
+ported to `AncillaSwapHook`** — every commit and reveal-and-swap here goes
+through the agent's own wallet directly. Flagged here on purpose, not
+discovered later.
 
 ## Contract parameters explained
 
@@ -546,10 +693,10 @@ checks rather than relying on manual review alone:
 
 | Command | What it shows |
 |---|---|
-| `npm test` | 93 tests, run 3x consecutively during development to rule out flakiness |
-| `npm run coverage` | Istanbul/solidity-coverage report — 100% statements/lines/functions across every contract, 94-100% branches on each core contract (`IntentCommitReveal` 95.16%, `AncillaSwapPool` 94.12%, `AncillaTreasuryMultisig` 95.45%, `SwapExecutor` 100%). The `ecrecover`-returns-zero-address branch, once (wrongly) written off here as "impractical to force deliberately," turned out not to be — a signature with `r=0` (not a valid secp256k1 x-coordinate) reliably makes `ecrecover` return the zero address, and is now an actual test. What's left uncovered is genuinely dead by design: defensive fallback code in `slashNoReveal` that the bond-locking fix made intentionally unreachable, and `AncillaSwapPool.swap()`'s own equivalent guard, which the AMM formula's own math makes unreachable (see "Sixth" bug). |
+| `npm test` | 114 tests, run 3x consecutively during development to rule out flakiness |
+| `npm run coverage` | Istanbul/solidity-coverage report — 100% statements/lines/functions across every contract, 94-100% branches on each core contract (`IntentCommitReveal` 95.16%, `AncillaSwapPool` 94.12%, `AncillaTreasuryMultisig` 95.45%, `SwapExecutor` 100%, `AncillaSwapHook` 72%). The `ecrecover`-returns-zero-address branch, once (wrongly) written off here as "impractical to force deliberately," turned out not to be — a signature with `r=0` (not a valid secp256k1 x-coordinate) reliably makes `ecrecover` return the zero address, and is now an actual test. What's left uncovered is genuinely dead by design: defensive fallback code in `slashNoReveal` that the bond-locking fix made intentionally unreachable, `AncillaSwapPool.swap()`'s own equivalent guard, which the AMM formula's own math makes unreachable (see "Sixth" bug), and — honestly, not yet chased down — some delta-sign edge branches in `AncillaHookRouter`/`AncillaLiquidityRouter` (e.g. a swap that moves zero of one currency) that every test so far happens not to hit. |
 | `npm run gas-report` | Per-function gas cost table (e.g. `commitIntent` ~78–95k gas, `revealIntentViaRelay` ~52k gas) |
-| `npm run size` | Deployed bytecode size — `IntentCommitReveal` is 6.31 KiB, `AncillaSwapPool` 2.19 KiB, `AncillaTreasuryMultisig` 2.95 KiB, `SwapExecutor` 1.26 KiB — all well under the 24 KiB EIP-170 limit Arbitrum also enforces |
+| `npm run size` | Deployed bytecode size — `IntentCommitReveal` is 6.19 KiB, `AncillaSwapHook` 5.60 KiB, `AncillaSwapPool` 2.14 KiB, `AncillaTreasuryMultisig` 2.26 KiB, `AncillaHookRouter` 2.77 KiB, `AncillaLiquidityRouter` 2.28 KiB, `SwapExecutor` 1.23 KiB — all well under the 24 KiB EIP-170 limit Arbitrum also enforces (Uniswap's own `PoolManager`, at ~19.3 KiB, is the one contract in this stack close to that ceiling — and it isn't ours; it's already deployed and live) |
 
 ### CI
 
