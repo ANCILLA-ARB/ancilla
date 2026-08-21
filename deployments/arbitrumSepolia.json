@@ -45,11 +45,11 @@
       "note": "Deployed and operated by Uniswap, not by this repo. Verified via docs.uniswap.org/contracts/v4/deployments."
     },
     "Create2Factory": {
-      "address": "0x5ea48E25C2c2962336Eb07f60d6F333Da48b7508"
+      "address": "0xCB3Db205162f2A85e6d69B4Bc7591cD63C579878"
     },
     "AncillaSwapHook": {
-      "address": "0x8b439f19281e01F3645Ae06Df336BEdc0Ff700C0",
-      "salt": "0x00000000000000000000000000000000000000000000000000000000000012f4",
+      "address": "0x14B1B0fCa28b37eD552B6e9C182DE0A53a7080c0",
+      "salt": "0x000000000000000000000000000000000000000000000000000000000000fd41",
       "poolManager": "0xFB3e0C6F74eB1a21CC1Da29aeC80D2Dfe6C9a317",
       "commitWindowSeconds": 120,
       "revealDelaySeconds": 30,
@@ -60,17 +60,17 @@
       "slasherRewardBps": 1000
     },
     "AncillaHookRouter": {
-      "address": "0x7a8187E70Fe76b60A84A2ae6a62dCe013eFfAa2C"
+      "address": "0xE6178F68FDD2eC1E51039394b6Ce7D944768f229"
     },
     "AncillaLiquidityRouter": {
-      "address": "0x2f3Da20ff6f6a82C2D47d32aB5d09534c3f07c43"
+      "address": "0x40361c5469C230585AaAD894352ACf8854455B86"
     },
     "AncillaHookPool": {
       "currency0": "0x9487f45a0fEf6C96d1571Ae7B32f020995710f73",
       "currency1": "0xCf7fC3b5A96cc8ef46D558fB455B63ec862ba977",
       "fee": 3000,
       "tickSpacing": 60,
-      "hooks": "0x8b439f19281e01F3645Ae06Df336BEdc0Ff700C0"
+      "hooks": "0x14B1B0fCa28b37eD552B6e9C182DE0A53a7080c0"
     },
     "MockExecutor": {
       "address": "0xB513256430aCC880b734750BDB552A921a1d6871"
@@ -112,5 +112,5 @@
       "maxLockSeconds": 62899200
     }
   },
-  "_comment": "Single source of truth for what's actually live on Arbitrum Sepolia. Values above verified directly on-chain (not copied from a deploy log) before this file was created. scripts/deploy.ts overwrites the IntentCommitReveal entry on every fresh deploy, and now REQUIRES AncillaTreasuryMultisig and AncillaGuardianMultisig to already exist in this file (throws instead of silently defaulting treasury/guardian back to a single EOA); scripts/deploy-swap.ts overwrites the TestTokenA/TestTokenB/AncillaSwapPool/SwapExecutor entries on every fresh deploy, without touching IntentCommitReveal; scripts/deploy-treasury.ts overwrites the AncillaTreasuryMultisig entry on every fresh deploy; scripts/deploy-guardian.ts overwrites the AncillaGuardianMultisig entry on every fresh deploy — note that deploying either multisig does NOT retroactively wire it into an already-deployed target's treasury/guardian, since both fields are immutable, only into the NEXT deploy.ts (or deploy-hook.ts) run; scripts/deploy-hook.ts overwrites the UniswapV4PoolManager/Create2Factory/AncillaSwapHook/AncillaHookRouter/AncillaLiquidityRouter/AncillaHookPool entries on every fresh deploy, reusing the existing TestTokenA/TestTokenB and now REQUIRES AncillaTreasuryMultisig and AncillaGuardianMultisig to already exist in this file too, same as deploy.ts — AncillaSwapHook's guardian is wired to the SAME AncillaGuardianMultisig instance as IntentCommitReveal.guardian (proven live in scripts/demo-guardian-multisig-hook.ts: one multisig, two independently deployed targets); scripts/deploy-token.ts overwrites the AncillaToken/AncillaTimelock/AncillaGovernor/AncillaStaking entries on every fresh deploy, leaving AncillaToken.owner as the deployer (it does NOT transfer ownership to the timelock itself — see AncillaToken's _ownerNote above for how that entry ended up being the timelock anyway, via a separate demo script, not this deploy script); scripts/deploy-vote-escrow.ts overwrites the AncillaVoteEscrow entry, additive to the token stack, not a replacement for AncillaStaking — funded independently through the same treasury-multisig-withdrawal-to-a-plain-receive() pattern; scripts/demo*.ts read from here instead of each hardcoding their own (previously inconsistent, some stale) copy of the address."
+  "_comment": "Single source of truth for what's actually live on Arbitrum Sepolia. Values above verified directly on-chain (not copied from a deploy log) before this file was created. scripts/deploy.ts overwrites the IntentCommitReveal entry on every fresh deploy, and now REQUIRES AncillaTreasuryMultisig and AncillaGuardianMultisig to already exist in this file (throws instead of silently defaulting treasury/guardian back to a single EOA); scripts/deploy-swap.ts overwrites the TestTokenA/TestTokenB/AncillaSwapPool/SwapExecutor entries on every fresh deploy, without touching IntentCommitReveal; scripts/deploy-treasury.ts overwrites the AncillaTreasuryMultisig entry on every fresh deploy; scripts/deploy-guardian.ts overwrites the AncillaGuardianMultisig entry on every fresh deploy — note that deploying either multisig does NOT retroactively wire it into an already-deployed target's treasury/guardian, since both fields are immutable, only into the NEXT deploy.ts (or deploy-hook.ts) run; scripts/deploy-hook.ts overwrites the UniswapV4PoolManager/Create2Factory/AncillaSwapHook/AncillaHookRouter/AncillaLiquidityRouter/AncillaHookPool entries on every fresh deploy, reusing the existing TestTokenA/TestTokenB and now REQUIRES AncillaTreasuryMultisig and AncillaGuardianMultisig to already exist in this file too, same as deploy.ts — AncillaSwapHook's guardian is wired to the SAME AncillaGuardianMultisig instance as IntentCommitReveal.guardian (proven live in scripts/demo-guardian-multisig-hook.ts: one multisig, two independently deployed targets); AncillaSwapHook now also has commitIntentViaRelay (ported from IntentCommitReveal, proven live in scripts/demo-hook-relay.ts) -- relayed reveal is deliberately still not ported, see the contract's own header comment for why; scripts/deploy-token.ts overwrites the AncillaToken/AncillaTimelock/AncillaGovernor/AncillaStaking entries on every fresh deploy, leaving AncillaToken.owner as the deployer (it does NOT transfer ownership to the timelock itself — see AncillaToken's _ownerNote above for how that entry ended up being the timelock anyway, via a separate demo script, not this deploy script); scripts/deploy-vote-escrow.ts overwrites the AncillaVoteEscrow entry, additive to the token stack, not a replacement for AncillaStaking — funded independently through the same treasury-multisig-withdrawal-to-a-plain-receive() pattern; scripts/demo*.ts read from here instead of each hardcoding their own (previously inconsistent, some stale) copy of the address."
 }

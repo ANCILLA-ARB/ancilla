@@ -35,9 +35,19 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 ///            committed to, before allowing it to proceed against real
 ///            pool liquidity. `_afterSwap` enforces the committed
 ///            `minAmountOut` against the swap's real, executed output.
-///          - EIP-712 relayed commit/reveal (Phase 3, partial, in
-///            `IntentCommitReveal`) is NOT yet ported here — a known,
-///            deliberately-flagged gap, not a silent omission.
+///          - EIP-712 relayed COMMIT (Phase 3, partial, in
+///            `IntentCommitReveal`) is now ported here too —
+///            `commitIntentViaRelay`, identical shape and identical
+///            `sdk/relay.ts` helpers as `IntentCommitReveal`'s. Relayed
+///            REVEAL is deliberately NOT ported: reveal here is fused
+///            into the swap transaction itself (see below), which moves
+///            the agent's real `tokenIn` during settlement — relaying
+///            that safely needs the relay to be authorized to move the
+///            agent's tokens too (a Permit2-style flow, or ERC-2612 on
+///            the token itself), not just a signature proving the
+///            commitment is authentic. That's a real, separate feature,
+///            not a port of the existing pattern — flagged here on
+///            purpose rather than force-fit into this pass.
 ///
 ///         WHAT DIDN'T CHANGE (same caveats as `IntentCommitReveal`):
 ///          - Does not hide anything from the Arbitrum sequencer.
@@ -77,6 +87,27 @@ contract AncillaSwapHook is BaseHook, Pausable {
     uint16 public immutable slasherRewardBps;
 
     // ---------------------------------------------------------------------
+    // EIP-712 (relayed commit signatures) — identical typehash/domain
+    // shape to IntentCommitReveal's, so sdk/relay.ts's signCommitRequest
+    // works unmodified against either contract, just pointed at whichever
+    // address is `verifyingContract`.
+    // ---------------------------------------------------------------------
+
+    bytes32 public constant EIP712_DOMAIN_TYPEHASH =
+        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+
+    bytes32 public constant COMMIT_TYPEHASH =
+        keccak256("CommitRequest(bytes32 commitId,bytes32 commitHash,address agent,uint256 deadline)");
+
+    bytes32 public immutable DOMAIN_SEPARATOR;
+
+    // secp256k1 curve order, and half of it — same malleability guard as
+    // IntentCommitReveal's identical constants.
+    uint256 private constant SECP256K1_N =
+        0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
+    uint256 private constant SECP256K1_HALF_N = SECP256K1_N / 2;
+
+    // ---------------------------------------------------------------------
     // State
     // ---------------------------------------------------------------------
 
@@ -102,8 +133,16 @@ contract AncillaSwapHook is BaseHook, Pausable {
 
     event BondDeposited(address indexed agent, uint256 amount, uint256 newBalance);
     event BondWithdrawn(address indexed agent, uint256 amount, uint256 newBalance);
+    /// @param relayer address(0) when the agent committed directly
+    ///        (`commitIntent`); otherwise the relay that submitted on the
+    ///        agent's behalf via `commitIntentViaRelay`.
     event IntentCommitted(
-        bytes32 indexed commitId, address indexed agent, uint64 epoch, uint64 revealOpenTime, uint64 revealCloseTime
+        bytes32 indexed commitId,
+        address indexed agent,
+        address relayer,
+        uint64 epoch,
+        uint64 revealOpenTime,
+        uint64 revealCloseTime
     );
     /// @notice Emitted once per successfully revealed-and-executed intent.
     /// @param amountOut The real, executed output amount (post-swap),
@@ -139,6 +178,11 @@ contract AncillaSwapHook is BaseHook, Pausable {
     ///         committed `minAmountOut`.
     error SlippageExceeded(uint256 amountOut, uint256 minAmountOut);
     error NotGuardian();
+    error SignatureExpired(uint256 deadline);
+    error InvalidSignatureLength();
+    error InvalidSignatureS();
+    error InvalidSignatureV();
+    error InvalidSigner();
 
     constructor(
         IPoolManager _manager,
@@ -162,6 +206,12 @@ contract AncillaSwapHook is BaseHook, Pausable {
         treasury = _treasury;
         guardian = _guardian;
         slasherRewardBps = _slasherRewardBps;
+
+        DOMAIN_SEPARATOR = keccak256(
+            abi.encode(
+                EIP712_DOMAIN_TYPEHASH, keccak256(bytes("Ancilla")), keccak256(bytes("1")), block.chainid, address(this)
+            )
+        );
     }
 
     function pause() external {
@@ -235,25 +285,88 @@ contract AncillaSwapHook is BaseHook, Pausable {
     }
 
     // ---------------------------------------------------------------------
-    // Commit — identical to IntentCommitReveal.commitIntent (no relay path
-    // yet — see header).
+    // Commit — identical to IntentCommitReveal.commitIntent /
+    // commitIntentViaRelay. Reveal has no relay path here — see header.
     // ---------------------------------------------------------------------
 
     /// @param commitId   caller-chosen unique id.
     /// @param commitHash keccak256(abi.encode(intentData, salt, msg.sender))
     ///        where intentData is abi.encode(tokenIn, amountIn, minAmountOut).
-    function commitIntent(bytes32 commitId, bytes32 commitHash) external whenNotPaused {
-        uint256 needed = lockedBond[msg.sender] + minBond;
-        if (bondBalance[msg.sender] < needed) revert BondTooLow(bondBalance[msg.sender], needed);
+    function commitIntent(bytes32 commitId, bytes32 commitHash) external {
+        _commit(commitId, commitHash, msg.sender, address(0));
+    }
+
+    /// @notice Same as `commitIntent`, but submitted by a relay on the
+    ///         agent's behalf — identical mechanism to
+    ///         `IntentCommitReveal.commitIntentViaRelay`, same
+    ///         `sdk/relay.ts` `signCommitRequest` helper, just pointed at
+    ///         this contract's address as `verifyingContract`.
+    /// @dev Permissionless, same as IntentCommitReveal's: any holder of a
+    ///      validly signed request may submit it, not just one
+    ///      designated relay address.
+    function commitIntentViaRelay(bytes32 commitId, bytes32 commitHash, address agent, uint256 deadline, bytes calldata signature)
+        external
+    {
+        if (block.timestamp > deadline) revert SignatureExpired(deadline);
+
+        bytes32 structHash = keccak256(abi.encode(COMMIT_TYPEHASH, commitId, commitHash, agent, deadline));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
+        address recovered = _recoverSigner(digest, signature);
+        if (recovered != agent) revert InvalidSigner();
+
+        _commit(commitId, commitHash, agent, msg.sender);
+    }
+
+    /// @dev Shared commit logic for both the self-submitted and relayed
+    ///      paths — same split as IntentCommitReveal's `_commit`.
+    ///      `whenNotPaused` lives here, not on each public entrypoint
+    ///      separately, so both paths are gated by one place.
+    function _commit(bytes32 commitId, bytes32 commitHash, address authorizedAgent, address relayer)
+        internal
+        whenNotPaused
+    {
+        uint256 needed = lockedBond[authorizedAgent] + minBond;
+        if (bondBalance[authorizedAgent] < needed) revert BondTooLow(bondBalance[authorizedAgent], needed);
         if (commitments[commitId].agent != address(0)) revert CommitAlreadyExists();
 
-        lockedBond[msg.sender] += minBond;
+        lockedBond[authorizedAgent] += minBond;
 
         uint64 epoch = currentEpoch();
-        commitments[commitId] =
-            Commitment({commitHash: commitHash, agent: msg.sender, epoch: epoch, revealed: false, slashed: false});
+        commitments[commitId] = Commitment({
+            commitHash: commitHash,
+            agent: authorizedAgent,
+            epoch: epoch,
+            revealed: false,
+            slashed: false
+        });
 
-        emit IntentCommitted(commitId, msg.sender, epoch, revealOpenTimeOf(epoch), revealCloseTimeOf(epoch));
+        emit IntentCommitted(commitId, authorizedAgent, relayer, epoch, revealOpenTimeOf(epoch), revealCloseTimeOf(epoch));
+    }
+
+    /// @dev Identical implementation to IntentCommitReveal's
+    ///      `_recoverSigner` — deliberately duplicated, not shared via an
+    ///      inherited base or library, matching this repo's existing
+    ///      choice to keep each deployed contract's full logic
+    ///      self-contained and independently auditable (see
+    ///      IntentCommitReveal.sol's own comment on the same function).
+    function _recoverSigner(bytes32 digest, bytes calldata signature) internal pure returns (address) {
+        if (signature.length != 65) revert InvalidSignatureLength();
+
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        assembly {
+            r := calldataload(signature.offset)
+            s := calldataload(add(signature.offset, 32))
+            v := byte(0, calldataload(add(signature.offset, 64)))
+        }
+
+        if (uint256(s) > SECP256K1_HALF_N) revert InvalidSignatureS();
+        if (v != 27 && v != 28) revert InvalidSignatureV();
+
+        address signer = ecrecover(digest, v, r, s);
+        if (signer == address(0)) revert InvalidSigner();
+        return signer;
     }
 
     // ---------------------------------------------------------------------

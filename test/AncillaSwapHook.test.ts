@@ -3,7 +3,16 @@ import { ethers } from "hardhat";
 import { loadFixture, time } from "@nomicfoundation/hardhat-network-helpers";
 import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
 import { buildIntent } from "../sdk/intent";
+import { signCommitRequest, domainFor, COMMIT_REQUEST_TYPES } from "../sdk/relay";
 import { mineHookAddress, HookFlags } from "../scripts/lib/hookMiner";
+
+// Deliberately huge, same reasoning as IntentCommitReveal.test.ts's
+// identical constant: signCommitRequest() computes its deadline from
+// real wall-clock Date.now(), but a Hardhat fixture's block.timestamp
+// can already be minutes ahead of real time — this buffer swamps that
+// gap so it doesn't intermittently expire a signature before the test
+// even submits it.
+const DEADLINE_BUFFER = 1_000_000;
 
 // Verified from @uniswap/v4-core/src/libraries/TickMath.sol — the standard
 // "no real limit" sentinel values used throughout the v4 ecosystem: one tick
@@ -309,6 +318,119 @@ describe("AncillaSwapHook + AncillaHookRouter (Option A: hook absorbs commit-rev
       await expect(rejecting.tryWithdraw(MIN_BOND)).to.be.reverted;
       // Balance accounting must be untouched by the failed attempt.
       expect(await hook.bondBalance(await rejecting.getAddress())).to.equal(MIN_BOND);
+    });
+  });
+
+  describe("commitIntentViaRelay (ported from IntentCommitReveal — see AncillaSwapHook.sol's header for why relayed REVEAL is not)", function () {
+    it("lets a third-party relay submit a commit the agent signed off-chain, using the SAME sdk/relay.ts helper as IntentCommitReveal", async function () {
+      const { hook, agent } = await loadFixture(deployHookStack);
+      const relay = (await ethers.getSigners())[5];
+      const hookAddr = await hook.getAddress();
+      await (await hook.connect(agent).depositBond({ value: MIN_BOND })).wait();
+
+      const intentData = encodeIntentData(ethers.ZeroAddress, 1n, 0n);
+      const built = buildIntent(agent.address, intentData, 1);
+      const network = await ethers.provider.getNetwork();
+      const { value, signature } = await signCommitRequest(
+        agent,
+        network.chainId,
+        hookAddr,
+        built.commitId,
+        built.commitHash,
+        DEADLINE_BUFFER
+      );
+
+      const tx = await hook
+        .connect(relay)
+        .commitIntentViaRelay(built.commitId, built.commitHash, agent.address, value.deadline, signature);
+      await expect(tx)
+        .to.emit(hook, "IntentCommitted")
+        .withArgs(
+          built.commitId,
+          agent.address,
+          relay.address,
+          await hook.currentEpoch(),
+          await hook.revealOpenTimeOf(await hook.currentEpoch()),
+          await hook.revealCloseTimeOf(await hook.currentEpoch())
+        );
+
+      const stored = await hook.commitments(built.commitId);
+      expect(stored.agent).to.equal(agent.address);
+      expect(await hook.lockedBond(agent.address)).to.equal(MIN_BOND);
+    });
+
+    it("rejects a commit relay submission signed by the wrong account", async function () {
+      const { hook, agent } = await loadFixture(deployHookStack);
+      const [, , , , , relay, outsider] = await ethers.getSigners();
+      const hookAddr = await hook.getAddress();
+      await (await hook.connect(agent).depositBond({ value: MIN_BOND })).wait();
+
+      const intentData = encodeIntentData(ethers.ZeroAddress, 1n, 0n);
+      const built = buildIntent(agent.address, intentData, 1);
+      const network = await ethers.provider.getNetwork();
+      // outsider signs, but the call claims to be acting for `agent`.
+      const { value, signature } = await signCommitRequest(
+        outsider,
+        network.chainId,
+        hookAddr,
+        built.commitId,
+        built.commitHash,
+        DEADLINE_BUFFER
+      );
+
+      await expect(
+        hook.connect(relay).commitIntentViaRelay(built.commitId, built.commitHash, agent.address, value.deadline, signature)
+      ).to.be.revertedWithCustomError(hook, "InvalidSigner");
+    });
+
+    it("rejects a commit relay submission after its own deadline has passed", async function () {
+      // Deadline built from chain time (time.latest()), not
+      // signCommitRequest()'s wall-clock Date.now() — see
+      // IntentCommitReveal.test.ts's identical test for why: mixing a
+      // real-time deadline with a chain-time advance is flaky under a
+      // full suite run, not just in theory.
+      const { hook, agent } = await loadFixture(deployHookStack);
+      const relay = (await ethers.getSigners())[5];
+      const hookAddr = await hook.getAddress();
+      await (await hook.connect(agent).depositBond({ value: MIN_BOND })).wait();
+
+      const intentData = encodeIntentData(ethers.ZeroAddress, 1n, 0n);
+      const built = buildIntent(agent.address, intentData, 1);
+      const network = await ethers.provider.getNetwork();
+
+      const deadline = BigInt((await time.latest()) + 5);
+      const structValue = { commitId: built.commitId, commitHash: built.commitHash, agent: agent.address, deadline };
+      const signature = await agent.signTypedData(domainFor(network.chainId, hookAddr), COMMIT_REQUEST_TYPES, structValue);
+
+      await time.increase(100);
+
+      await expect(
+        hook.connect(relay).commitIntentViaRelay(built.commitId, built.commitHash, agent.address, deadline, signature)
+      ).to.be.revertedWithCustomError(hook, "SignatureExpired");
+    });
+
+    it("still respects a pause — a relayed commit is blocked exactly like a direct one", async function () {
+      const { hook, agent, guardian } = await loadFixture(deployHookStack);
+      const relay = (await ethers.getSigners())[5];
+      const hookAddr = await hook.getAddress();
+      await (await hook.connect(agent).depositBond({ value: MIN_BOND })).wait();
+      await (await hook.connect(guardian).pause()).wait();
+
+      const intentData = encodeIntentData(ethers.ZeroAddress, 1n, 0n);
+      const built = buildIntent(agent.address, intentData, 1);
+      const network = await ethers.provider.getNetwork();
+      const { value, signature } = await signCommitRequest(
+        agent,
+        network.chainId,
+        hookAddr,
+        built.commitId,
+        built.commitHash,
+        DEADLINE_BUFFER
+      );
+
+      await expect(
+        hook.connect(relay).commitIntentViaRelay(built.commitId, built.commitHash, agent.address, value.deadline, signature)
+      ).to.be.revertedWithCustomError(hook, "EnforcedPause");
     });
   });
 

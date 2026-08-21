@@ -20,6 +20,7 @@
     "demo-treasury:sepolia": "hardhat run scripts/demo-treasury.ts --network arbitrumSepolia",
     "deploy-hook:sepolia": "hardhat run scripts/deploy-hook.ts --network arbitrumSepolia",
     "demo-hook-swap:sepolia": "hardhat run scripts/demo-hook-swap.ts --network arbitrumSepolia",
+    "demo-hook-relay:sepolia": "hardhat run scripts/demo-hook-relay.ts --network arbitrumSepolia",
     "demo-pause:sepolia": "hardhat run scripts/demo-pause.ts --network arbitrumSepolia",
     "demo-slasher-reward:sepolia": "hardhat run scripts/demo-slasher-reward.ts --network arbitrumSepolia",
     "deploy-guardian:sepolia": "hardhat run scripts/deploy-guardian.ts --network arbitrumSepolia",

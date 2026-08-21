@@ -149,13 +149,16 @@ deck.
   failed-transfer case that proves a bad withdrawal reverts fully instead
   of getting stuck half-executed, and a deliberate reentrancy attack from
   a malicious withdrawal recipient that is also a listed owner, and
-  [`test/AncillaSwapHook.test.ts`](test/AncillaSwapHook.test.ts) — **24
+  [`test/AncillaSwapHook.test.ts`](test/AncillaSwapHook.test.ts) — **28
   more** covering the v4 hook stack: mining a real CREATE2 hook address,
   bonding, a full commit → reveal-and-swap cycle against a real locally
   deployed `PoolManager` in both swap directions, every rejection path the
   hook is actually supposed to enforce (early/late reveal, hash mismatch,
-  wrong token/direction/amount, slippage, replay), and the identical
+  wrong token/direction/amount, slippage, replay), the identical
   emergency-pause behavior ported from `IntentCommitReveal`, and
+  `commitIntentViaRelay` — the relayed-commit path ported from
+  `IntentCommitReveal` too (see "Uniswap v4 hook architecture" below for
+  why relayed *reveal* deliberately wasn't), and
   [`test/AncillaGuardianMultisig.test.ts`](test/AncillaGuardianMultisig.test.ts)
   — **23 more** covering the M-of-N multisig that now gates pause/unpause
   on both contracts, including a live-target integration test (a real
@@ -172,7 +175,7 @@ deck.
   [`test/AncillaVoteEscrow.test.ts`](test/AncillaVoteEscrow.test.ts)
   (**14**, lock-weighted revenue splitting — a 2x-duration lock earning
   exactly 2x the same distribution as an equal-amount, half-duration one).
-  **190 tests total, all passing** (re-run 3x
+  **194 tests total, all passing** (re-run 3x
   consecutively to rule out flakiness). 100% statement/line/function
   coverage, 94%+ branch coverage on every core contract except the two v4
   router contracts (`npm run coverage`
@@ -201,7 +204,7 @@ Run it yourself:
 ```bash
 npm install
 npm run compile
-npm test              # 190 tests (46 + 10 relay-server + 20 swap executor + 25 treasury multisig + 24 v4 hook + 23 guardian multisig + 9 token + 7 governor + 12 staking + 14 vote escrow)
+npm test              # 194 tests (46 + 10 relay-server + 20 swap executor + 25 treasury multisig + 28 v4 hook + 23 guardian multisig + 9 token + 7 governor + 12 staking + 14 vote escrow)
 npm run coverage      # statement/branch/function/line coverage report
 npm run gas-report    # per-function gas cost table
 npm run size          # deployed bytecode size vs the 24KB EIP-170 limit
@@ -255,7 +258,7 @@ npm run size          # deployed bytecode size vs the 24KB EIP-170 limit
   remaining mainnet-readiness items first (see below) and treat a
   professional audit as the final gate before any deployment that holds
   real value, rather than auditing code that's still actively changing.
-  Everything in this repo is self-reviewed in the meantime: 190 unit tests,
+  Everything in this repo is self-reviewed in the meantime: 194 unit tests,
   100% line coverage / 94%+ branch
   coverage on the core contract, three live testnet demos plus a local
   relay-server E2E run, and two deliberate self-attack tests (reentrancy
@@ -330,9 +333,9 @@ them stale — caught and fixed in a cleanup pass, not before.)
 | `AncillaSwapPool` (constant-product AMM, aUSD/aETH) | [`0x3663a10bB68cEbe477843673385d5D97ea12cb0b`](https://sepolia.arbiscan.io/address/0x3663a10bB68cEbe477843673385d5D97ea12cb0b) |
 | `SwapExecutor` (real `IIntentExecutor`) | [`0x10896dDf2e5D5E9fbc2Eb3dd2C65719A86aaDc76`](https://sepolia.arbiscan.io/address/0x10896dDf2e5D5E9fbc2Eb3dd2C65719A86aaDc76) |
 | `AncillaTreasuryMultisig` (2-of-3, now actually wired into `IntentCommitReveal.treasury` above — see "Mainnet readiness") | [`0xC5d4f69B53520DC5a625BA8197176E053C845800`](https://sepolia.arbiscan.io/address/0xC5d4f69B53520DC5a625BA8197176E053C845800) |
-| `AncillaSwapHook` ("Option A" v4 architecture, emergency pause) | [`0x8b439f19281e01F3645Ae06Df336BEdc0Ff700C0`](https://sepolia.arbiscan.io/address/0x8b439f19281e01F3645Ae06Df336BEdc0Ff700C0) |
-| `AncillaHookRouter` | [`0x7a8187E70Fe76b60A84A2ae6a62dCe013eFfAa2C`](https://sepolia.arbiscan.io/address/0x7a8187E70Fe76b60A84A2ae6a62dCe013eFfAa2C) |
-| `AncillaLiquidityRouter` | [`0x2f3Da20ff6f6a82C2D47d32aB5d09534c3f07c43`](https://sepolia.arbiscan.io/address/0x2f3Da20ff6f6a82C2D47d32aB5d09534c3f07c43) |
+| `AncillaSwapHook` ("Option A" v4 architecture, emergency pause, relayed commit) | [`0x14B1B0fCa28b37eD552B6e9C182DE0A53a7080c0`](https://sepolia.arbiscan.io/address/0x14B1B0fCa28b37eD552B6e9C182DE0A53a7080c0) |
+| `AncillaHookRouter` | [`0xE6178F68FDD2eC1E51039394b6Ce7D944768f229`](https://sepolia.arbiscan.io/address/0xE6178F68FDD2eC1E51039394b6Ce7D944768f229) |
+| `AncillaLiquidityRouter` | [`0x40361c5469C230585AaAD894352ACf8854455B86`](https://sepolia.arbiscan.io/address/0x40361c5469C230585AaAD894352ACf8854455B86) |
 | `AncillaGuardianMultisig` (2-of-3, shared guardian for both `IntentCommitReveal` and `AncillaSwapHook` above) | [`0x26E1A66E96296125c5C04fB90c64D167e27694c1`](https://sepolia.arbiscan.io/address/0x26E1A66E96296125c5C04fB90c64D167e27694c1) |
 | Uniswap v4 `PoolManager` (Uniswap's, not ours) | [`0xFB3e0C6F74eB1a21CC1Da29aeC80D2Dfe6C9a317`](https://sepolia.arbiscan.io/address/0xFB3e0C6F74eB1a21CC1Da29aeC80D2Dfe6C9a317) |
 | `AncillaToken` (ANCILLA — see "ANCILLA token & governance") | [`0xaC3fa7eC9b277D677145CdF6B7F551D0cd204182`](https://sepolia.arbiscan.io/address/0xaC3fa7eC9b277D677145CdF6B7F551D0cd204182) |
@@ -361,9 +364,9 @@ once you set `ARBISCAN_API_KEY` in `.env`.
 
 This is the **sixth** deployment of `IntentCommitReveal` — redeployed
 again to wire `treasury`/`guardian` to the two multisigs above instead of
-a single EOA — and the **fourth** of `AncillaSwapHook` — redeployed for
-the same reason, to move its `guardian` off a single EOA onto the shared
-multisig. Being precise about what's actually been
+a single EOA — and the **fifth** of `AncillaSwapHook` — redeployed most
+recently to add `commitIntentViaRelay` (see "Uniswap v4 hook
+architecture" below). Being precise about what's actually been
 re-proven against *these exact* addresses, instead of implying everything
 carried over automatically just because the source code did:
 
@@ -409,9 +412,19 @@ carried over automatically just because the source code did:
   **delta**: exactly the committed `amountIn` moved out, output balance
   increased, `commitments(commitId).revealed` flipped true, one
   `IntentSwapExecuted` event. Example tx:
-  [commit](https://sepolia.arbiscan.io/tx/0x25e9ad03b21ddf160c19369f292c60b1bc241ab6aed22fee840947498f2538d4),
-  [reveal-and-swap](https://sepolia.arbiscan.io/tx/0xf80ad0dc64e6243dacd5f49b4cb75669112b6ca84616d4edf4d2f9b49716ef3b).
+  [commit](https://sepolia.arbiscan.io/tx/0xcb2135fa86efd0b92811d832302f6e1bf623ed4b2666ab3db6a922ea48ae141d),
+  [reveal-and-swap](https://sepolia.arbiscan.io/tx/0x29d4e1f289bbc56110a38f49badfdb83bda79f799829dcf1b076052361ad7cdc).
   See "Uniswap v4 hook architecture" below for the full design writeup.
+- **The hook's commit can now be relayed too** (`npm run demo-hook-relay:sepolia`,
+  [`scripts/demo-hook-relay.ts`](scripts/demo-hook-relay.ts)) — the agent
+  signs a `CommitRequest` off-chain and never submits a transaction for
+  it; a separate relay wallet submits `commitIntentViaRelay`, pays gas,
+  and is `msg.sender` on-chain, while the commitment lands correctly
+  attributed to the agent — verified independently, then carried through
+  a real reveal-and-swap by the agent's own wallet afterward to confirm
+  it's fully usable, not just recorded. Example tx:
+  [commitIntentViaRelay (submitted by the relay)](https://sepolia.arbiscan.io/tx/0xd39de5aac48d167dfb5f265972617e6137dc5dd299d2e9d1a5757e79dca5083a),
+  [reveal-and-swap (submitted by the agent)](https://sepolia.arbiscan.io/tx/0xafe5ad603d020108bccc6a769b52ee0a012a2492dcf928dcd437792d3617a92b).
 - **Emergency pause, now governed by a 2-of-3 multisig instead of a
   single EOA** (`npm run demo-guardian-multisig:sepolia`,
   [`scripts/demo-guardian-multisig.ts`](scripts/demo-guardian-multisig.ts))
@@ -444,8 +457,8 @@ carried over automatically just because the source code did:
   this is genuinely one shared instance governing two independently
   deployed contracts, not two multisigs that happen to share an address.
   Example tx:
-  [execute pause](https://sepolia.arbiscan.io/tx/0x964231dce902f728e056ebe3e29253268fa643eebae03295ae5e3cc13e5359ab),
-  [execute unpause](https://sepolia.arbiscan.io/tx/0x2c6cf52823dcb3edf856c2fd149c84344715777bbf1b575bbc03f7f343f0fa92).
+  [execute pause](https://sepolia.arbiscan.io/tx/0x92f7a39d67c0d0d6d43425243b8c2c1d74e11ff93e2d4118468db5f304eff0b5),
+  [execute unpause](https://sepolia.arbiscan.io/tx/0x1a22678751a1caf174482296b6282213aaf03272c66d3994b0fda7146124c4dc).
 - **Treasury multisig** (`npm run demo-treasury:sepolia`,
   [`scripts/demo-treasury.ts`](scripts/demo-treasury.ts)) — verified live
   against the `AncillaTreasuryMultisig` deployment above (owners: the
@@ -576,11 +589,22 @@ this was verified per-file before depending on any of it, not assumed:
 Same caveats as `IntentCommitReveal` apply identically here — this doesn't
 hide anything from the Arbitrum sequencer, isn't a ZK system, and the
 batching window is still `block.timestamp` math, not a VRF. One
-additional, deliberate gap specific to this architecture: **EIP-712
-relayed commit/reveal (Phase 3 in `IntentCommitReveal`) has not been
-ported to `AncillaSwapHook`** — every commit and reveal-and-swap here goes
-through the agent's own wallet directly. Flagged here on purpose, not
-discovered later.
+gap specific to this architecture, now half-closed: **EIP-712 relayed
+COMMIT (Phase 3 in `IntentCommitReveal`) is now ported to
+`AncillaSwapHook`** — `commitIntentViaRelay`, same `sdk/relay.ts`
+`signCommitRequest` helper, same permissionless-relay design, **proven
+live** (`npm run demo-hook-relay:sepolia`) with two distinct wallets: the
+agent signs off-chain and never submits a transaction, a separate relay
+wallet submits `commitIntentViaRelay` and pays gas, and the commitment
+lands correctly attributed to the agent — verified independently, then
+carried through a real reveal-and-swap afterward to confirm it's fully
+usable, not just recorded. Relayed **reveal** deliberately remains
+unported: reveal here is fused into the swap transaction itself, which
+moves the agent's real `tokenIn` during settlement — relaying that
+safely needs the relay to be authorized to move the agent's tokens too
+(a Permit2-style flow, or ERC-2612 on the token), not just a signature
+proving the commitment is authentic. A real, separate feature, flagged
+here on purpose rather than force-fit into this pass.
 
 ## ANCILLA token & governance
 
@@ -941,7 +965,7 @@ checks rather than relying on manual review alone:
 
 | Command | What it shows |
 |---|---|
-| `npm test` | 190 tests, run 3x consecutively during development to rule out flakiness |
+| `npm test` | 194 tests, run 3x consecutively during development to rule out flakiness |
 | `npm run coverage` | Istanbul/solidity-coverage report — 100% statements/lines/functions across every contract, 94-100% branches on each core contract (`IntentCommitReveal` 94.74%, `AncillaSwapPool` 94.12%, `AncillaTreasuryMultisig` 95.45%, `SwapExecutor` 100%, `AncillaSwapHook` 72%). The `ecrecover`-returns-zero-address branch, once (wrongly) written off here as "impractical to force deliberately," turned out not to be — a signature with `r=0` (not a valid secp256k1 x-coordinate) reliably makes `ecrecover` return the zero address, and is now an actual test. What's left uncovered is genuinely dead by design: defensive fallback code in `slashNoReveal` that the bond-locking fix made intentionally unreachable, `AncillaSwapPool.swap()`'s own equivalent guard, which the AMM formula's own math makes unreachable (see "Sixth" bug), and — honestly, not yet chased down — some delta-sign edge branches in `AncillaHookRouter`/`AncillaLiquidityRouter` (e.g. a swap that moves zero of one currency) that every test so far happens not to hit. |
 | `npm run gas-report` | Per-function gas cost table (e.g. `commitIntent` ~78–95k gas, `revealIntentViaRelay` ~52k gas) |
 | `npm run size` | Deployed bytecode size — `IntentCommitReveal` is 7.10 KiB, `AncillaSwapHook` 6.24 KiB, `AncillaSwapPool` 2.14 KiB, `AncillaTreasuryMultisig` 2.26 KiB, `AncillaHookRouter` 2.77 KiB, `AncillaLiquidityRouter` 2.28 KiB, `SwapExecutor` 1.23 KiB — all well under the 24 KiB EIP-170 limit Arbitrum also enforces (Uniswap's own `PoolManager`, at ~19.3 KiB, is the one contract in this stack close to that ceiling — and it isn't ours; it's already deployed and live) |
