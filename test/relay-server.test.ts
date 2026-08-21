@@ -24,10 +24,17 @@ const DEADLINE_BUFFER = 1_000_000; // see main test file for why this needs to b
 
 describe("relay-server app", function () {
   async function deploy() {
-    const [treasury, agent, relay, other] = await ethers.getSigners();
+    const [treasury, agent, relay, other, guardian] = await ethers.getSigners();
 
     const Contract = await ethers.getContractFactory("IntentCommitReveal");
-    const contract = await Contract.deploy(COMMIT_WINDOW, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, treasury.address);
+    const contract = await Contract.deploy(
+      COMMIT_WINDOW,
+      REVEAL_DELAY,
+      REVEAL_WINDOW,
+      MIN_BOND,
+      treasury.address,
+      guardian.address
+    );
     await contract.waitForDeployment();
 
     const Executor = await ethers.getContractFactory("MockExecutor");

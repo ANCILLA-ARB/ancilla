@@ -32,6 +32,12 @@ async function main() {
   // commit-reveal-execute demo cycle comfortably fits. NOT a production value.
   const MIN_BOND = ethers.parseEther("0.001");
   const treasury = deployer.address; // replace with a real multisig before any real deployment
+  // Same "replace before any real deployment" caveat as treasury above —
+  // a single EOA guardian is documented in IntentCommitReveal.sol's header
+  // as an intentional MVP simplification, not a final design. Pausing only
+  // ever blocks NEW commitIntent calls; reveals/withdrawals/slashing keep
+  // working even while paused, so this can't be used to trap funds.
+  const guardian = deployer.address;
 
   const Factory = await ethers.getContractFactory("IntentCommitReveal");
   const contract = await Factory.deploy(
@@ -39,7 +45,8 @@ async function main() {
     REVEAL_DELAY_SECONDS,
     REVEAL_WINDOW_SECONDS,
     MIN_BOND,
-    treasury
+    treasury,
+    guardian
   );
   await contract.waitForDeployment();
 
@@ -51,6 +58,7 @@ async function main() {
     REVEAL_WINDOW_SECONDS,
     MIN_BOND: MIN_BOND.toString(),
     treasury,
+    guardian,
   });
 
   const deploymentsPath = path.join(__dirname, "..", "deployments", `${network.name}.json`);
@@ -72,6 +80,7 @@ async function main() {
     revealWindowSeconds: REVEAL_WINDOW_SECONDS,
     minBond: MIN_BOND.toString(),
     treasury,
+    guardian,
   };
   fs.mkdirSync(path.dirname(deploymentsPath), { recursive: true });
   fs.writeFileSync(deploymentsPath, JSON.stringify(existing, null, 2) + "\n");

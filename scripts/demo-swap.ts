@@ -144,6 +144,17 @@ async function main() {
   const built = buildIntent(agent.address, intentData, nonce);
   console.log("   commitId:", built.commitId, "(only this hash is visible on-chain right now — not the token, amount, or price)");
 
+  // Snapshot BEFORE committing — the agent wallet is reused across this
+  // repo's demos, so it may already hold aUSD/aETH from an earlier run.
+  // Checking the DELTA, not an absolute balance, is what's actually being
+  // proven here. (An earlier version of this script asserted an absolute
+  // zero/expected balance instead and would have false-failed once the
+  // wallet had leftover balance from a prior run — the same mistake was
+  // caught and fixed in demo-hook-swap.ts first; documented in the README
+  // rather than silently patched.)
+  const agentTokenABalBefore: bigint = await tokenA.balanceOf(agent.address);
+  const agentTokenBBalBefore: bigint = await tokenB.balanceOf(agent.address);
+
   const commitTx = await contractAsAgent.commitIntent(built.commitId, built.commitHash);
   console.log("   commitIntent tx:", explorerTx(commitTx.hash));
   await commitTx.wait();
@@ -166,10 +177,12 @@ async function main() {
 
   // ---------------------------------------------------------------------
   console.log("\n[7/7] Independently verifying the swap actually happened, on-chain...");
-  const agentTokenABal: bigint = await tokenA.balanceOf(agent.address);
-  const agentTokenBBal: bigint = await tokenB.balanceOf(agent.address);
-  console.log("   agent aUSD balance after:", ethers.formatUnits(agentTokenABal, 18), "(expected 0)");
-  console.log("   agent aETH balance after:", ethers.formatUnits(agentTokenBBal, 18), "(expected", ethers.formatUnits(expectedOut, 18), ")");
+  const agentTokenABalAfter: bigint = await tokenA.balanceOf(agent.address);
+  const agentTokenBBalAfter: bigint = await tokenB.balanceOf(agent.address);
+  const aUsdSpent = agentTokenABalBefore - agentTokenABalAfter;
+  const aEthReceived = agentTokenBBalAfter - agentTokenBBalBefore;
+  console.log("   agent aUSD spent:", ethers.formatUnits(aUsdSpent, 18), "(expected exactly", ethers.formatUnits(amountIn, 18), ")");
+  console.log("   agent aETH received:", ethers.formatUnits(aEthReceived, 18), "(expected exactly", ethers.formatUnits(expectedOut, 18), ")");
 
   const swapEvents = await pool.queryFilter(pool.filters.Swap(), revealReceipt!.blockNumber, revealReceipt!.blockNumber);
   const executedEvents = await (await ethers.getContractAt("SwapExecutor", swapDeployment.executor)).queryFilter(
@@ -181,8 +194,8 @@ async function main() {
   const stored = await contract.commitments(built.commitId);
   const success =
     stored.revealed === true &&
-    agentTokenABal === 0n &&
-    agentTokenBBal === expectedOut &&
+    aUsdSpent === amountIn &&
+    aEthReceived === expectedOut &&
     swapEvents.length === 1 &&
     executedEvents.length === 1;
 

@@ -395,10 +395,17 @@ describe("SwapExecutor", function () {
 
 describe("Full narrative: private swap intent, batched, then really executed", function () {
   it("commits a swap intent privately, reveals it once the batch window opens, and the swap actually happens with correct AMM output", async function () {
-    const [treasury, agent, lp] = await ethers.getSigners();
+    const [treasury, agent, lp, guardian] = await ethers.getSigners();
 
     const Contract = await ethers.getContractFactory("IntentCommitReveal");
-    const contract = await Contract.deploy(COMMIT_WINDOW, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, treasury.address);
+    const contract = await Contract.deploy(
+      COMMIT_WINDOW,
+      REVEAL_DELAY,
+      REVEAL_WINDOW,
+      MIN_BOND,
+      treasury.address,
+      guardian.address
+    );
     await contract.waitForDeployment();
 
     const Token = await ethers.getContractFactory("TestToken");

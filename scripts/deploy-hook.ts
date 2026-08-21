@@ -57,6 +57,12 @@ async function main() {
 
   // ---------------------------------------------------------------------
   console.log("\n[2/6] Mining a hook address encoding {beforeSwap, afterSwap}...");
+  // Same single-EOA MVP simplification documented in AncillaSwapHook.sol's
+  // header comment — replace with a dedicated pause-multisig before any
+  // real deployment. Pausing only ever blocks new commitIntent calls;
+  // reveal-and-swap keeps working even while paused.
+  const guardian = deployer.address;
+
   const HookFactory = await ethers.getContractFactory("AncillaSwapHook");
   const constructorArgsEncoded = HookFactory.interface.encodeDeploy([
     UNISWAP_V4_POOL_MANAGER,
@@ -65,6 +71,7 @@ async function main() {
     REVEAL_WINDOW_SECONDS,
     MIN_BOND,
     treasuryMultisig.address,
+    guardian,
   ]);
   const flags = HookFlags.BEFORE_SWAP | HookFlags.AFTER_SWAP;
   const mined = mineHookAddress(factoryAddress, flags, HookFactory.bytecode, constructorArgsEncoded);
@@ -162,6 +169,7 @@ async function main() {
     revealWindowSeconds: REVEAL_WINDOW_SECONDS,
     minBond: MIN_BOND.toString(),
     treasury: treasuryMultisig.address,
+    guardian,
   };
   existing.contracts.AncillaHookRouter = { address: routerAddress };
   existing.contracts.AncillaLiquidityRouter = { address: liquidityRouterAddress };

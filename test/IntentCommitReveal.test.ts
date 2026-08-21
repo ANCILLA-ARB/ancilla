@@ -29,7 +29,7 @@ async function alignToFreshEpoch(commitWindow: number) {
 
 describe("IntentCommitReveal", function () {
   async function deploy() {
-    const [treasury, agent, other] = await ethers.getSigners();
+    const [treasury, agent, other, guardian] = await ethers.getSigners();
 
     const Contract = await ethers.getContractFactory("IntentCommitReveal");
     const contract = await Contract.deploy(
@@ -37,7 +37,8 @@ describe("IntentCommitReveal", function () {
       REVEAL_DELAY,
       REVEAL_WINDOW,
       MIN_BOND,
-      treasury.address
+      treasury.address,
+      guardian.address
     );
     await contract.waitForDeployment();
 
@@ -45,31 +46,84 @@ describe("IntentCommitReveal", function () {
     const executor = await Executor.deploy();
     await executor.waitForDeployment();
 
-    return { contract, executor, treasury, agent, other };
+    return { contract, executor, treasury, agent, other, guardian };
   }
 
   describe("constructor validation", function () {
     it("rejects a zero commitWindowSeconds", async function () {
-      const [treasury] = await ethers.getSigners();
+      const [treasury, , , guardian] = await ethers.getSigners();
       const Contract = await ethers.getContractFactory("IntentCommitReveal");
       await expect(
-        Contract.deploy(0, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, treasury.address)
+        Contract.deploy(0, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, treasury.address, guardian.address)
       ).to.be.revertedWith("commitWindow=0");
     });
 
     it("rejects a zero revealWindowSeconds", async function () {
-      const [treasury] = await ethers.getSigners();
+      const [treasury, , , guardian] = await ethers.getSigners();
       const Contract = await ethers.getContractFactory("IntentCommitReveal");
       await expect(
-        Contract.deploy(COMMIT_WINDOW, REVEAL_DELAY, 0, MIN_BOND, treasury.address)
+        Contract.deploy(COMMIT_WINDOW, REVEAL_DELAY, 0, MIN_BOND, treasury.address, guardian.address)
       ).to.be.revertedWith("revealWindow=0");
     });
 
     it("rejects a zero treasury address", async function () {
+      const [, , , guardian] = await ethers.getSigners();
       const Contract = await ethers.getContractFactory("IntentCommitReveal");
       await expect(
-        Contract.deploy(COMMIT_WINDOW, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, ethers.ZeroAddress)
+        Contract.deploy(COMMIT_WINDOW, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, ethers.ZeroAddress, guardian.address)
       ).to.be.revertedWith("treasury=0");
+    });
+
+    it("rejects a zero guardian address", async function () {
+      const [treasury] = await ethers.getSigners();
+      const Contract = await ethers.getContractFactory("IntentCommitReveal");
+      await expect(
+        Contract.deploy(COMMIT_WINDOW, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, treasury.address, ethers.ZeroAddress)
+      ).to.be.revertedWith("guardian=0");
+    });
+  });
+
+  describe("emergency pause", function () {
+    it("lets the guardian pause and unpause", async function () {
+      const { contract, guardian } = await loadFixture(deploy);
+      expect(await contract.paused()).to.equal(false);
+      await expect(contract.connect(guardian).pause()).to.emit(contract, "Paused").withArgs(guardian.address);
+      expect(await contract.paused()).to.equal(true);
+      await expect(contract.connect(guardian).unpause()).to.emit(contract, "Unpaused").withArgs(guardian.address);
+      expect(await contract.paused()).to.equal(false);
+    });
+
+    it("rejects pause/unpause from anyone but the guardian", async function () {
+      const { contract, agent } = await loadFixture(deploy);
+      await expect(contract.connect(agent).pause()).to.be.revertedWithCustomError(contract, "NotGuardian");
+      await expect(contract.connect(agent).unpause()).to.be.revertedWithCustomError(contract, "NotGuardian");
+    });
+
+    it("blocks new commits while paused, but never blocks resolving what's already committed", async function () {
+      const { contract, executor, agent, guardian } = await loadFixture(deploy);
+      await alignToFreshEpoch(COMMIT_WINDOW); // full commit window ahead, avoids an unrelated timing revert
+      await contract.connect(agent).depositBond({ value: MIN_BOND });
+      const intentData = ethers.AbiCoder.defaultAbiCoder().encode(["string"], ["swap 1 ETH -> USDC"]);
+      const builtBeforePause = buildIntent(agent.address, intentData, 1);
+      await contract.connect(agent).commitIntent(builtBeforePause.commitId, builtBeforePause.commitHash);
+
+      await contract.connect(guardian).pause();
+
+      // New commit: blocked.
+      const builtDuringPause = buildIntent(agent.address, intentData, 2);
+      await expect(
+        contract.connect(agent).commitIntent(builtDuringPause.commitId, builtDuringPause.commitHash)
+      ).to.be.revertedWithCustomError(contract, "EnforcedPause");
+
+      // Resolving the commitment made before the pause: NOT blocked, even
+      // while still paused.
+      const c = await contract.commitments(builtBeforePause.commitId);
+      const revealOpen = await contract.revealOpenTimeOf(c.epoch);
+      await time.increaseTo(revealOpen);
+      expect(await contract.paused()).to.equal(true); // still paused during this reveal
+      await expect(
+        contract.connect(agent).revealIntent(builtBeforePause.commitId, intentData, builtBeforePause.salt, await executor.getAddress())
+      ).to.emit(contract, "IntentRevealed");
     });
   });
 

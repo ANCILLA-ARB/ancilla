@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {IIntentExecutor} from "./IIntentExecutor.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
 /// @title IntentCommitReveal (Ancilla protocol)
 /// @notice Phase 1+2 privacy primitive for AI-agent transaction intents on Arbitrum.
@@ -69,7 +70,23 @@ import {IIntentExecutor} from "./IIntentExecutor.sol";
 ///          an on-chain observer can link to the agent's real wallet even
 ///          further, but it is still not sequencer-level privacy (see
 ///          above) and still assumes a relay is actually available.
-contract IntentCommitReveal {
+///
+///         EMERGENCY PAUSE (mainnet-readiness item, see README):
+///          `guardian` can pause/unpause new commitments
+///          (`commitIntent`/`commitIntentViaRelay`) via OpenZeppelin's
+///          `Pausable`. Deliberately narrow: pausing blocks NEW exposure
+///          from growing, but never blocks resolving what's already
+///          committed — `revealIntent`, `revealIntentViaRelay`,
+///          `withdrawBond`, and `slashNoReveal` all keep working while
+///          paused, so an emergency stop can never trap an agent's already
+///          -locked bond or already-committed intent. `guardian` is a
+///          single immutable address for now — an intentional MVP
+///          simplification, not a final design: a real mainnet deployment
+///          should point it at a dedicated pause-multisig, not a single
+///          EOA (and deliberately not at `AncillaTreasuryMultisig` either
+///          — that contract is scoped to ETH custody only and has no
+///          mechanism to call anything else, including this).
+contract IntentCommitReveal is Pausable {
     // ---------------------------------------------------------------------
     // Config
     // ---------------------------------------------------------------------
@@ -91,6 +108,11 @@ contract IntentCommitReveal {
     uint256 public immutable minBond;
 
     address public immutable treasury;
+
+    /// @notice Can pause/unpause new commitments — see the header comment
+    ///         for exactly what pausing does and doesn't do, and why this
+    ///         is a single address for now.
+    address public immutable guardian;
 
     // ---------------------------------------------------------------------
     // EIP-712 (relayed reveal signatures)
@@ -175,22 +197,26 @@ contract IntentCommitReveal {
     error InvalidSignatureS();
     error InvalidSignatureV();
     error InvalidSigner();
+    error NotGuardian();
 
     constructor(
         uint64 _commitWindowSeconds,
         uint64 _revealDelaySeconds,
         uint64 _revealWindowSeconds,
         uint256 _minBond,
-        address _treasury
+        address _treasury,
+        address _guardian
     ) {
         require(_commitWindowSeconds > 0, "commitWindow=0");
         require(_revealWindowSeconds > 0, "revealWindow=0");
         require(_treasury != address(0), "treasury=0");
+        require(_guardian != address(0), "guardian=0");
         commitWindowSeconds = _commitWindowSeconds;
         revealDelaySeconds = _revealDelaySeconds;
         revealWindowSeconds = _revealWindowSeconds;
         minBond = _minBond;
         treasury = _treasury;
+        guardian = _guardian;
 
         DOMAIN_SEPARATOR = keccak256(
             abi.encode(
@@ -201,6 +227,21 @@ contract IntentCommitReveal {
                 address(this)
             )
         );
+    }
+
+    // ---------------------------------------------------------------------
+    // Emergency pause — see the header comment for exactly what this does
+    // and doesn't cover.
+    // ---------------------------------------------------------------------
+
+    function pause() external {
+        if (msg.sender != guardian) revert NotGuardian();
+        _pause();
+    }
+
+    function unpause() external {
+        if (msg.sender != guardian) revert NotGuardian();
+        _unpause();
     }
 
     // ---------------------------------------------------------------------
@@ -288,7 +329,14 @@ contract IntentCommitReveal {
     ///      checked and recorded against — already proven authentic by
     ///      either msg.sender equality in `commitIntent`, or a verified
     ///      signature in `commitIntentViaRelay`, before this is called.
-    function _commit(bytes32 commitId, bytes32 commitHash, address authorizedAgent, address relayer) internal {
+    ///      `whenNotPaused` lives here, not on each public entrypoint
+    ///      separately, so both paths are gated by one place — see the
+    ///      header comment for why only new commits (not reveals,
+    ///      withdrawals, or slashing) are ever blocked by a pause.
+    function _commit(bytes32 commitId, bytes32 commitHash, address authorizedAgent, address relayer)
+        internal
+        whenNotPaused
+    {
         // Must have enough UNLOCKED bond to cover this commitment on top of
         // whatever is already reserved against other pending ones — this is
         // what actually makes the bond function as collateral instead of a

@@ -8,6 +8,7 @@ export interface IntentCommitRevealDeployment {
   revealWindowSeconds: number;
   minBond: string;
   treasury: string;
+  guardian?: string;
 }
 
 /**
@@ -90,6 +91,7 @@ export interface AncillaHookDeployment {
   revealWindowSeconds: number;
   minBond: string;
   treasury: string;
+  guardian?: string;
 }
 
 export interface AncillaHookPoolKey {

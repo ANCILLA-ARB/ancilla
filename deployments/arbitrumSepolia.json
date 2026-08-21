@@ -3,12 +3,13 @@
   "chainId": 421614,
   "contracts": {
     "IntentCommitReveal": {
-      "address": "0xb2a513260DA2e61490386B3BE1773DB99d5a91f3",
+      "address": "0x1a8381b2B73c586732514343b4d402718c13eF7F",
       "commitWindowSeconds": 120,
       "revealDelaySeconds": 30,
       "revealWindowSeconds": 120,
       "minBond": "1000000000000000",
-      "treasury": "0x5d01654edC4C618947e054E541b1937b7D165975"
+      "treasury": "0x5d01654edC4C618947e054E541b1937b7D165975",
+      "guardian": "0x5d01654edC4C618947e054E541b1937b7D165975"
     },
     "TestTokenA": {
       "address": "0xCf7fC3b5A96cc8ef46D558fB455B63ec862ba977",
@@ -43,30 +44,31 @@
       "note": "Deployed and operated by Uniswap, not by this repo. Verified via docs.uniswap.org/contracts/v4/deployments."
     },
     "Create2Factory": {
-      "address": "0xA2fAaB59a84c4A014502c388572fa7C08a461616"
+      "address": "0xeB52A90bbE3b10CfEA83c43E3eDe3EcbE02969c5"
     },
     "AncillaSwapHook": {
-      "address": "0x1241d7ca96122A679A47E2004B5b2EDD90B040C0",
-      "salt": "0x0000000000000000000000000000000000000000000000000000000000001e19",
+      "address": "0xCe060F1Cc7E55D64bE60E0E5e87d5d27fE2c00c0",
+      "salt": "0x0000000000000000000000000000000000000000000000000000000000006f58",
       "poolManager": "0xFB3e0C6F74eB1a21CC1Da29aeC80D2Dfe6C9a317",
       "commitWindowSeconds": 120,
       "revealDelaySeconds": 30,
       "revealWindowSeconds": 120,
       "minBond": "1000000000000000",
-      "treasury": "0xC5d4f69B53520DC5a625BA8197176E053C845800"
+      "treasury": "0xC5d4f69B53520DC5a625BA8197176E053C845800",
+      "guardian": "0x5d01654edC4C618947e054E541b1937b7D165975"
     },
     "AncillaHookRouter": {
-      "address": "0x2CA93f517B079d63d3EbAc8634292EE0046c2Cb8"
+      "address": "0xc30c5A6e33A26682F4cDaD5e67198092075F1381"
     },
     "AncillaLiquidityRouter": {
-      "address": "0xE458c47Fd7a3A145302b3C85B1047F3a4FB31d67"
+      "address": "0x344868cDc089BEe48708731f55Db4d4129C76D1B"
     },
     "AncillaHookPool": {
       "currency0": "0x9487f45a0fEf6C96d1571Ae7B32f020995710f73",
       "currency1": "0xCf7fC3b5A96cc8ef46D558fB455B63ec862ba977",
       "fee": 3000,
       "tickSpacing": 60,
-      "hooks": "0x1241d7ca96122A679A47E2004B5b2EDD90B040C0"
+      "hooks": "0xCe060F1Cc7E55D64bE60E0E5e87d5d27fE2c00c0"
     }
   },
   "_comment": "Single source of truth for what's actually live on Arbitrum Sepolia. Values above verified directly on-chain (not copied from a deploy log) before this file was created. scripts/deploy.ts overwrites the IntentCommitReveal entry on every fresh deploy; scripts/deploy-swap.ts overwrites the TestTokenA/TestTokenB/AncillaSwapPool/SwapExecutor entries on every fresh deploy, without touching IntentCommitReveal; scripts/deploy-treasury.ts overwrites the AncillaTreasuryMultisig entry on every fresh deploy — note that deploying a new multisig here does NOT retroactively wire it into IntentCommitReveal.treasury, since that field is immutable; scripts/deploy-hook.ts overwrites the UniswapV4PoolManager/Create2Factory/AncillaSwapHook/AncillaHookRouter/AncillaLiquidityRouter/AncillaHookPool entries on every fresh deploy, reusing the existing TestTokenA/TestTokenB and wiring treasury straight to the already-deployed AncillaTreasuryMultisig; scripts/demo*.ts read from here instead of each hardcoding their own (previously inconsistent, some stale) copy of the address."

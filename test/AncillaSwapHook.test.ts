@@ -37,7 +37,7 @@ const TICK_SPACING = 60;
 const SQRT_PRICE_1_1 = 79228162514264337593543950336n; // 2^96 — the standard "1:1 price" constant used throughout Uniswap v3/v4
 
 async function deployHookStack() {
-  const [deployer, agent, treasury] = await ethers.getSigners();
+  const [deployer, agent, treasury, guardian] = await ethers.getSigners();
 
   const PoolManager = await ethers.getContractFactory("PoolManager");
   const poolManager = await PoolManager.deploy(deployer.address);
@@ -70,6 +70,7 @@ async function deployHookStack() {
     REVEAL_WINDOW,
     MIN_BOND,
     treasury.address,
+    guardian.address,
   ]);
   const creationCode = HookFactory.bytecode;
   const flags = HookFlags.BEFORE_SWAP | HookFlags.AFTER_SWAP;
@@ -135,6 +136,7 @@ async function deployHookStack() {
     deployer,
     agent,
     treasury,
+    guardian,
     poolManager,
     hook,
     router,
@@ -230,7 +232,7 @@ describe("AncillaSwapHook + AncillaHookRouter (Option A: hook absorbs commit-rev
       expect(flags).to.equal(HookFlags.BEFORE_SWAP | HookFlags.AFTER_SWAP);
     });
 
-    it("rejects a zero commitWindow / zero revealWindow / zero treasury, same as IntentCommitReveal", async function () {
+    it("rejects a zero commitWindow / zero revealWindow / zero treasury / zero guardian, same as IntentCommitReveal", async function () {
       const [deployer] = await ethers.getSigners();
       const PoolManager = await ethers.getContractFactory("PoolManager");
       const poolManager = await PoolManager.deploy(deployer.address);
@@ -240,13 +242,16 @@ describe("AncillaSwapHook + AncillaHookRouter (Option A: hook absorbs commit-rev
       // (require() checks are first in the constructor body), so no
       // CREATE2 mining is needed to prove the rejection.
       await expect(
-        Hook.deploy(await poolManager.getAddress(), 0, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, deployer.address)
+        Hook.deploy(await poolManager.getAddress(), 0, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, deployer.address, deployer.address)
       ).to.be.reverted;
       await expect(
-        Hook.deploy(await poolManager.getAddress(), COMMIT_WINDOW, REVEAL_DELAY, 0, MIN_BOND, deployer.address)
+        Hook.deploy(await poolManager.getAddress(), COMMIT_WINDOW, REVEAL_DELAY, 0, MIN_BOND, deployer.address, deployer.address)
       ).to.be.reverted;
       await expect(
-        Hook.deploy(await poolManager.getAddress(), COMMIT_WINDOW, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, ethers.ZeroAddress)
+        Hook.deploy(await poolManager.getAddress(), COMMIT_WINDOW, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, ethers.ZeroAddress, deployer.address)
+      ).to.be.reverted;
+      await expect(
+        Hook.deploy(await poolManager.getAddress(), COMMIT_WINDOW, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, deployer.address, ethers.ZeroAddress)
       ).to.be.reverted;
     });
   });
@@ -299,6 +304,53 @@ describe("AncillaSwapHook + AncillaHookRouter (Option A: hook absorbs commit-rev
       await expect(rejecting.tryWithdraw(MIN_BOND)).to.be.reverted;
       // Balance accounting must be untouched by the failed attempt.
       expect(await hook.bondBalance(await rejecting.getAddress())).to.equal(MIN_BOND);
+    });
+  });
+
+  describe("emergency pause (ported from IntentCommitReveal)", function () {
+    it("lets the guardian pause and unpause", async function () {
+      const { hook, guardian } = await loadFixture(deployHookStack);
+      expect(await hook.paused()).to.equal(false);
+      await expect(hook.connect(guardian).pause()).to.emit(hook, "Paused").withArgs(guardian.address);
+      expect(await hook.paused()).to.equal(true);
+      await expect(hook.connect(guardian).unpause()).to.emit(hook, "Unpaused").withArgs(guardian.address);
+      expect(await hook.paused()).to.equal(false);
+    });
+
+    it("rejects pause/unpause from anyone but the guardian", async function () {
+      const { hook, agent } = await loadFixture(deployHookStack);
+      await expect(hook.connect(agent).pause()).to.be.revertedWithCustomError(hook, "NotGuardian");
+      await expect(hook.connect(agent).unpause()).to.be.revertedWithCustomError(hook, "NotGuardian");
+    });
+
+    it("blocks new commits while paused, but never blocks resolving an already-committed reveal-and-swap", async function () {
+      const fixture = await loadFixture(deployHookStack);
+      const { hook, router, agent, guardian, key } = fixture;
+      const amountIn = ethers.parseUnits("100", 18);
+      const { built, intentData, openTime } = await commitSwap(fixture, {
+        tokenIn: "token0",
+        amountIn,
+        minAmountOut: 1n,
+        nonce: 1,
+      });
+
+      await hook.connect(guardian).pause();
+
+      // A brand new commit: blocked.
+      await expect(hook.connect(agent).commitIntent(ethers.ZeroHash, ethers.ZeroHash)).to.be.revertedWithCustomError(
+        hook,
+        "EnforcedPause"
+      );
+
+      // Resolving the commitment made before the pause: NOT blocked, even
+      // while still paused.
+      await time.increaseTo(openTime);
+      expect(await hook.paused()).to.equal(true);
+      const params = { zeroForOne: true, amountSpecified: -amountIn, sqrtPriceLimitX96: MIN_SQRT_PRICE + 1n };
+      await expect(router.connect(agent).revealAndSwap(key, params, built.commitId, intentData, built.salt)).to.emit(
+        hook,
+        "IntentSwapExecuted"
+      );
     });
   });
 

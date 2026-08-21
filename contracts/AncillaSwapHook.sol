@@ -9,6 +9,7 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
 /// @title AncillaSwapHook (Ancilla protocol — Option A architecture)
 /// @notice Uniswap v4 hook that absorbs Ancilla's full commit-reveal
@@ -43,7 +44,15 @@ import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/type
 ///          - Not a ZK proof system — a hash commitment plus an economic
 ///            bond, same as before.
 ///          - Batching randomness is `block.timestamp` math, not a VRF.
-contract AncillaSwapHook is BaseHook {
+///
+///         EMERGENCY PAUSE: same shape as IntentCommitReveal's — `guardian`
+///         can pause/unpause `commitIntent` only. `revealAndSwap` (via
+///         `_beforeSwap`/`_afterSwap`) keeps working while paused, so an
+///         agent with an already-locked bond and an already-submitted
+///         commitment can always still resolve it. Single immutable
+///         address for now, same documented MVP caveat as
+///         IntentCommitReveal's.
+contract AncillaSwapHook is BaseHook, Pausable {
     // ---------------------------------------------------------------------
     // Config — identical shape to IntentCommitReveal's constructor params.
     // ---------------------------------------------------------------------
@@ -53,6 +62,7 @@ contract AncillaSwapHook is BaseHook {
     uint64 public immutable revealWindowSeconds;
     uint256 public immutable minBond;
     address public immutable treasury;
+    address public immutable guardian;
 
     // ---------------------------------------------------------------------
     // State
@@ -114,6 +124,7 @@ contract AncillaSwapHook is BaseHook {
     /// @notice The real, executed output fell below `intentData`'s
     ///         committed `minAmountOut`.
     error SlippageExceeded(uint256 amountOut, uint256 minAmountOut);
+    error NotGuardian();
 
     constructor(
         IPoolManager _manager,
@@ -121,16 +132,29 @@ contract AncillaSwapHook is BaseHook {
         uint64 _revealDelaySeconds,
         uint64 _revealWindowSeconds,
         uint256 _minBond,
-        address _treasury
+        address _treasury,
+        address _guardian
     ) BaseHook(_manager) {
         require(_commitWindowSeconds > 0, "commitWindow=0");
         require(_revealWindowSeconds > 0, "revealWindow=0");
         require(_treasury != address(0), "treasury=0");
+        require(_guardian != address(0), "guardian=0");
         commitWindowSeconds = _commitWindowSeconds;
         revealDelaySeconds = _revealDelaySeconds;
         revealWindowSeconds = _revealWindowSeconds;
         minBond = _minBond;
         treasury = _treasury;
+        guardian = _guardian;
+    }
+
+    function pause() external {
+        if (msg.sender != guardian) revert NotGuardian();
+        _pause();
+    }
+
+    function unpause() external {
+        if (msg.sender != guardian) revert NotGuardian();
+        _unpause();
     }
 
     /// @notice Only `beforeSwap` and `afterSwap` are used — deliberately
@@ -201,7 +225,7 @@ contract AncillaSwapHook is BaseHook {
     /// @param commitId   caller-chosen unique id.
     /// @param commitHash keccak256(abi.encode(intentData, salt, msg.sender))
     ///        where intentData is abi.encode(tokenIn, amountIn, minAmountOut).
-    function commitIntent(bytes32 commitId, bytes32 commitHash) external {
+    function commitIntent(bytes32 commitId, bytes32 commitHash) external whenNotPaused {
         uint256 needed = lockedBond[msg.sender] + minBond;
         if (bondBalance[msg.sender] < needed) revert BondTooLow(bondBalance[msg.sender], needed);
         if (commitments[commitId].agent != address(0)) revert CommitAlreadyExists();

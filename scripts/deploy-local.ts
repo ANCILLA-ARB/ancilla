@@ -20,7 +20,8 @@ async function main() {
     REVEAL_DELAY_SECONDS,
     REVEAL_WINDOW_SECONDS,
     MIN_BOND,
-    deployer.address
+    deployer.address,
+    deployer.address // guardian — same single-EOA MVP simplification as deploy.ts
   );
   await contract.waitForDeployment();
 
