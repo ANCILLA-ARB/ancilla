@@ -38,6 +38,11 @@ async function main() {
   // ever blocks NEW commitIntent calls; reveals/withdrawals/slashing keep
   // working even while paused, so this can't be used to trap funds.
   const guardian = deployer.address;
+  // 10% of every slashed penalty goes to whoever calls slashNoReveal
+  // instead of 100% to treasury — see IntentCommitReveal.sol's header
+  // comment ("ECONOMIC HARDENING") for why a permissionless-but-unrewarded
+  // function in practice doesn't get called by anyone but the operator.
+  const SLASHER_REWARD_BPS = 1000;
 
   const Factory = await ethers.getContractFactory("IntentCommitReveal");
   const contract = await Factory.deploy(
@@ -46,7 +51,8 @@ async function main() {
     REVEAL_WINDOW_SECONDS,
     MIN_BOND,
     treasury,
-    guardian
+    guardian,
+    SLASHER_REWARD_BPS
   );
   await contract.waitForDeployment();
 
@@ -59,6 +65,7 @@ async function main() {
     MIN_BOND: MIN_BOND.toString(),
     treasury,
     guardian,
+    SLASHER_REWARD_BPS,
   });
 
   const deploymentsPath = path.join(__dirname, "..", "deployments", `${network.name}.json`);
@@ -81,6 +88,7 @@ async function main() {
     minBond: MIN_BOND.toString(),
     treasury,
     guardian,
+    slasherRewardBps: SLASHER_REWARD_BPS,
   };
   fs.mkdirSync(path.dirname(deploymentsPath), { recursive: true });
   fs.writeFileSync(deploymentsPath, JSON.stringify(existing, null, 2) + "\n");

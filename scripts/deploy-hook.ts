@@ -62,6 +62,9 @@ async function main() {
   // real deployment. Pausing only ever blocks new commitIntent calls;
   // reveal-and-swap keeps working even while paused.
   const guardian = deployer.address;
+  // Same 10% default as deploy.ts — see AncillaSwapHook.sol's header
+  // comment ("ECONOMIC HARDENING").
+  const SLASHER_REWARD_BPS = 1000;
 
   const HookFactory = await ethers.getContractFactory("AncillaSwapHook");
   const constructorArgsEncoded = HookFactory.interface.encodeDeploy([
@@ -72,6 +75,7 @@ async function main() {
     MIN_BOND,
     treasuryMultisig.address,
     guardian,
+    SLASHER_REWARD_BPS,
   ]);
   const flags = HookFlags.BEFORE_SWAP | HookFlags.AFTER_SWAP;
   const mined = mineHookAddress(factoryAddress, flags, HookFactory.bytecode, constructorArgsEncoded);
@@ -170,6 +174,7 @@ async function main() {
     minBond: MIN_BOND.toString(),
     treasury: treasuryMultisig.address,
     guardian,
+    slasherRewardBps: SLASHER_REWARD_BPS,
   };
   existing.contracts.AncillaHookRouter = { address: routerAddress };
   existing.contracts.AncillaLiquidityRouter = { address: liquidityRouterAddress };

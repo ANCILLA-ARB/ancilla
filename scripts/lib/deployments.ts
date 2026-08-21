@@ -9,6 +9,7 @@ export interface IntentCommitRevealDeployment {
   minBond: string;
   treasury: string;
   guardian?: string;
+  slasherRewardBps?: number;
 }
 
 /**
@@ -92,6 +93,7 @@ export interface AncillaHookDeployment {
   minBond: string;
   treasury: string;
   guardian?: string;
+  slasherRewardBps?: number;
 }
 
 export interface AncillaHookPoolKey {

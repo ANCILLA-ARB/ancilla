@@ -404,7 +404,8 @@ describe("Full narrative: private swap intent, batched, then really executed", f
       REVEAL_WINDOW,
       MIN_BOND,
       treasury.address,
-      guardian.address
+      guardian.address,
+      1000 // slasherRewardBps — not exercised by this suite
     );
     await contract.waitForDeployment();
 

@@ -21,7 +21,8 @@ async function main() {
     REVEAL_WINDOW_SECONDS,
     MIN_BOND,
     deployer.address,
-    deployer.address // guardian — same single-EOA MVP simplification as deploy.ts
+    deployer.address, // guardian — same single-EOA MVP simplification as deploy.ts
+    1000 // slasherRewardBps (10%) — same default as deploy.ts
   );
   await contract.waitForDeployment();
 

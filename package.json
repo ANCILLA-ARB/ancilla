@@ -21,6 +21,7 @@
     "deploy-hook:sepolia": "hardhat run scripts/deploy-hook.ts --network arbitrumSepolia",
     "demo-hook-swap:sepolia": "hardhat run scripts/demo-hook-swap.ts --network arbitrumSepolia",
     "demo-pause:sepolia": "hardhat run scripts/demo-pause.ts --network arbitrumSepolia",
+    "demo-slasher-reward:sepolia": "hardhat run scripts/demo-slasher-reward.ts --network arbitrumSepolia",
     "relay-server": "ts-node relay-server/index.ts",
     "relay-server:e2e": "ts-node scripts/relay-server-e2e.ts",
     "relay-server:multi-e2e": "ts-node scripts/relay-server-multi-e2e.ts"

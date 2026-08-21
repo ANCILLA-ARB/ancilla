@@ -86,6 +86,34 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 ///          EOA (and deliberately not at `AncillaTreasuryMultisig` either
 ///          — that contract is scoped to ETH custody only and has no
 ///          mechanism to call anything else, including this).
+///
+///         ECONOMIC HARDENING (mainnet-readiness item, see README):
+///          `slashNoReveal` was already permissionless (anyone could call
+///          it), but 100% of the penalty went to `treasury` — meaning
+///          nobody but the protocol operator had any actual reason to
+///          spend their own gas calling it, which in practice meant
+///          slashing relied on someone remembering to do it, not on the
+///          "permissionless" property doing real work. `slasherRewardBps`
+///          fixes that by paying whoever calls `slashNoReveal` a cut of
+///          the penalty (basis points out of 10,000) — the rest still
+///          goes to `treasury`. Same pattern as liquidation bounties in
+///          lending protocols: turn enforcement into something
+///          profit-driven and decentralized instead of something that
+///          depends on an operator noticing.
+///
+///          What this does NOT fix, and can't without breaking the
+///          protocol's own point: bond is a flat amount, not scaled to
+///          the notional value of what's being committed. At commit time
+///          only a hash is on-chain — the contract has no way to know
+///          (and must not reveal) whether an intent is worth $10 or
+///          $1,000,000. For a large enough trade, `minBond` can be
+///          smaller than the value an agent could gain from walking away
+///          (forfeiting the bond) rather than executing an intent that
+///          became unprofitable between commit and reveal. This is a
+///          known, structural limitation of flat-bond commit-reveal, not
+///          an oversight — see the README for the fuller writeup, and for
+///          why fixing it properly is a mechanism-design question, not a
+///          one-line patch.
 contract IntentCommitReveal is Pausable {
     // ---------------------------------------------------------------------
     // Config
@@ -113,6 +141,11 @@ contract IntentCommitReveal is Pausable {
     ///         for exactly what pausing does and doesn't do, and why this
     ///         is a single address for now.
     address public immutable guardian;
+
+    /// @notice Share of a slashed penalty (basis points out of 10,000)
+    ///         paid to whoever calls `slashNoReveal`, instead of the full
+    ///         amount going to `treasury` — see the header comment.
+    uint16 public immutable slasherRewardBps;
 
     // ---------------------------------------------------------------------
     // EIP-712 (relayed reveal signatures)
@@ -180,7 +213,13 @@ contract IntentCommitReveal is Pausable {
     ///        otherwise the relay that submitted on the agent's behalf via
     ///        `revealIntentViaRelay`.
     event IntentRevealed(bytes32 indexed commitId, address indexed agent, address indexed executor, address relayer, bool success);
-    event IntentSlashed(bytes32 indexed commitId, address indexed agent, uint256 amount);
+    /// @param totalPenalty the full amount forfeited by `agent` (unchanged
+    ///        meaning from before the slasher-reward split existed).
+    /// @param slasherReward the cut of `totalPenalty` paid to `slasher`;
+    ///        `totalPenalty - slasherReward` went to `treasury`.
+    event IntentSlashed(
+        bytes32 indexed commitId, address indexed agent, uint256 totalPenalty, uint256 slasherReward, address slasher
+    );
 
     error BondTooLow(uint256 have, uint256 need);
     error CommitAlreadyExists();
@@ -205,18 +244,21 @@ contract IntentCommitReveal is Pausable {
         uint64 _revealWindowSeconds,
         uint256 _minBond,
         address _treasury,
-        address _guardian
+        address _guardian,
+        uint16 _slasherRewardBps
     ) {
         require(_commitWindowSeconds > 0, "commitWindow=0");
         require(_revealWindowSeconds > 0, "revealWindow=0");
         require(_treasury != address(0), "treasury=0");
         require(_guardian != address(0), "guardian=0");
+        require(_slasherRewardBps <= 10_000, "slasherRewardBps>100%");
         commitWindowSeconds = _commitWindowSeconds;
         revealDelaySeconds = _revealDelaySeconds;
         revealWindowSeconds = _revealWindowSeconds;
         minBond = _minBond;
         treasury = _treasury;
         guardian = _guardian;
+        slasherRewardBps = _slasherRewardBps;
 
         DOMAIN_SEPARATOR = keccak256(
             abi.encode(
@@ -495,11 +537,18 @@ contract IntentCommitReveal is Pausable {
         if (penalty > bal) penalty = bal;
         bondBalance[c.agent] = bal - penalty;
 
-        if (penalty > 0) {
-            (bool ok, ) = treasury.call{value: penalty}("");
-            require(ok, "slash transfer failed");
+        uint256 reward = (penalty * slasherRewardBps) / 10_000;
+        uint256 toTreasury = penalty - reward;
+
+        if (toTreasury > 0) {
+            (bool okTreasury, ) = treasury.call{value: toTreasury}("");
+            require(okTreasury, "slash transfer failed");
+        }
+        if (reward > 0) {
+            (bool okReward, ) = msg.sender.call{value: reward}("");
+            require(okReward, "slasher reward transfer failed");
         }
 
-        emit IntentSlashed(commitId, c.agent, penalty);
+        emit IntentSlashed(commitId, c.agent, penalty, reward, msg.sender);
     }
 }

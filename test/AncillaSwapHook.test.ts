@@ -32,6 +32,7 @@ const COMMIT_WINDOW = 300;
 const REVEAL_DELAY = 60;
 const REVEAL_WINDOW = 300;
 const MIN_BOND = ethers.parseEther("0.1");
+const SLASHER_REWARD_BPS = 1000; // 10% — see AncillaSwapHook.sol's header comment
 const FEE = 3000; // 0.3%, matches AncillaSwapPool's fee for an apples-to-apples comparison
 const TICK_SPACING = 60;
 const SQRT_PRICE_1_1 = 79228162514264337593543950336n; // 2^96 — the standard "1:1 price" constant used throughout Uniswap v3/v4
@@ -71,6 +72,7 @@ async function deployHookStack() {
     MIN_BOND,
     treasury.address,
     guardian.address,
+    SLASHER_REWARD_BPS,
   ]);
   const creationCode = HookFactory.bytecode;
   const flags = HookFlags.BEFORE_SWAP | HookFlags.AFTER_SWAP;
@@ -242,16 +244,19 @@ describe("AncillaSwapHook + AncillaHookRouter (Option A: hook absorbs commit-rev
       // (require() checks are first in the constructor body), so no
       // CREATE2 mining is needed to prove the rejection.
       await expect(
-        Hook.deploy(await poolManager.getAddress(), 0, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, deployer.address, deployer.address)
+        Hook.deploy(await poolManager.getAddress(), 0, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, deployer.address, deployer.address, SLASHER_REWARD_BPS)
       ).to.be.reverted;
       await expect(
-        Hook.deploy(await poolManager.getAddress(), COMMIT_WINDOW, REVEAL_DELAY, 0, MIN_BOND, deployer.address, deployer.address)
+        Hook.deploy(await poolManager.getAddress(), COMMIT_WINDOW, REVEAL_DELAY, 0, MIN_BOND, deployer.address, deployer.address, SLASHER_REWARD_BPS)
       ).to.be.reverted;
       await expect(
-        Hook.deploy(await poolManager.getAddress(), COMMIT_WINDOW, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, ethers.ZeroAddress, deployer.address)
+        Hook.deploy(await poolManager.getAddress(), COMMIT_WINDOW, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, ethers.ZeroAddress, deployer.address, SLASHER_REWARD_BPS)
       ).to.be.reverted;
       await expect(
-        Hook.deploy(await poolManager.getAddress(), COMMIT_WINDOW, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, deployer.address, ethers.ZeroAddress)
+        Hook.deploy(await poolManager.getAddress(), COMMIT_WINDOW, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, deployer.address, ethers.ZeroAddress, SLASHER_REWARD_BPS)
+      ).to.be.reverted;
+      await expect(
+        Hook.deploy(await poolManager.getAddress(), COMMIT_WINDOW, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, deployer.address, deployer.address, 10_001)
       ).to.be.reverted;
     });
   });
@@ -569,13 +574,14 @@ describe("AncillaSwapHook + AncillaHookRouter (Option A: hook absorbs commit-rev
       const { built, closeTime } = await commitSwap(fixture, { tokenIn: "token0", amountIn, minAmountOut: 1n, nonce: 1 });
       await time.increaseTo(closeTime);
 
+      const expectedReward = (MIN_BOND * BigInt(SLASHER_REWARD_BPS)) / 10_000n;
       const treasuryBalBefore = await ethers.provider.getBalance(treasury.address);
       await expect(hook.slashNoReveal(built.commitId))
         .to.emit(hook, "IntentSlashed")
-        .withArgs(built.commitId, agent.address, MIN_BOND);
+        .withArgs(built.commitId, agent.address, MIN_BOND, expectedReward, anyValue);
       const treasuryBalAfter = await ethers.provider.getBalance(treasury.address);
 
-      expect(treasuryBalAfter - treasuryBalBefore).to.equal(MIN_BOND);
+      expect(treasuryBalAfter - treasuryBalBefore).to.equal(MIN_BOND - expectedReward);
       expect(await hook.lockedBond(agent.address)).to.equal(0n);
     });
 

@@ -8,6 +8,7 @@ const COMMIT_WINDOW = 300; // seconds per epoch
 const REVEAL_DELAY = 60; // seconds after epoch closes before reveal opens
 const REVEAL_WINDOW = 300; // seconds reveal stays open
 const MIN_BOND = ethers.parseEther("0.1");
+const SLASHER_REWARD_BPS = 1000; // 10% — see IntentCommitReveal.sol's header comment
 // Deliberately huge: signRevealRequest() computes its deadline from real
 // wall-clock Date.now() (correct for a live network), but tests run against
 // a Hardhat fixture whose block.timestamp can be minutes ahead of real time
@@ -38,7 +39,8 @@ describe("IntentCommitReveal", function () {
       REVEAL_WINDOW,
       MIN_BOND,
       treasury.address,
-      guardian.address
+      guardian.address,
+      SLASHER_REWARD_BPS
     );
     await contract.waitForDeployment();
 
@@ -54,7 +56,7 @@ describe("IntentCommitReveal", function () {
       const [treasury, , , guardian] = await ethers.getSigners();
       const Contract = await ethers.getContractFactory("IntentCommitReveal");
       await expect(
-        Contract.deploy(0, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, treasury.address, guardian.address)
+        Contract.deploy(0, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, treasury.address, guardian.address, SLASHER_REWARD_BPS)
       ).to.be.revertedWith("commitWindow=0");
     });
 
@@ -62,7 +64,7 @@ describe("IntentCommitReveal", function () {
       const [treasury, , , guardian] = await ethers.getSigners();
       const Contract = await ethers.getContractFactory("IntentCommitReveal");
       await expect(
-        Contract.deploy(COMMIT_WINDOW, REVEAL_DELAY, 0, MIN_BOND, treasury.address, guardian.address)
+        Contract.deploy(COMMIT_WINDOW, REVEAL_DELAY, 0, MIN_BOND, treasury.address, guardian.address, SLASHER_REWARD_BPS)
       ).to.be.revertedWith("revealWindow=0");
     });
 
@@ -70,7 +72,7 @@ describe("IntentCommitReveal", function () {
       const [, , , guardian] = await ethers.getSigners();
       const Contract = await ethers.getContractFactory("IntentCommitReveal");
       await expect(
-        Contract.deploy(COMMIT_WINDOW, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, ethers.ZeroAddress, guardian.address)
+        Contract.deploy(COMMIT_WINDOW, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, ethers.ZeroAddress, guardian.address, SLASHER_REWARD_BPS)
       ).to.be.revertedWith("treasury=0");
     });
 
@@ -78,8 +80,16 @@ describe("IntentCommitReveal", function () {
       const [treasury] = await ethers.getSigners();
       const Contract = await ethers.getContractFactory("IntentCommitReveal");
       await expect(
-        Contract.deploy(COMMIT_WINDOW, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, treasury.address, ethers.ZeroAddress)
+        Contract.deploy(COMMIT_WINDOW, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, treasury.address, ethers.ZeroAddress, SLASHER_REWARD_BPS)
       ).to.be.revertedWith("guardian=0");
+    });
+
+    it("rejects a slasherRewardBps above 100%", async function () {
+      const [treasury, , , guardian] = await ethers.getSigners();
+      const Contract = await ethers.getContractFactory("IntentCommitReveal");
+      await expect(
+        Contract.deploy(COMMIT_WINDOW, REVEAL_DELAY, REVEAL_WINDOW, MIN_BOND, treasury.address, guardian.address, 10_001)
+      ).to.be.revertedWith("slasherRewardBps>100%");
     });
   });
 
@@ -379,21 +389,79 @@ describe("IntentCommitReveal", function () {
 
     // Slash is called by a third party (`other`), NOT by treasury itself,
     // so the treasury's balance delta below is pure penalty, uncontaminated
-    // by the caller's own gas cost.
+    // by the caller's own gas cost. With SLASHER_REWARD_BPS=1000 (10%),
+    // treasury gets 90% of the penalty, `other` (the caller) gets the
+    // other 10% — see the dedicated "slasher reward" test below for the
+    // precise reward-to-caller verification (gas-cost-adjusted).
+    const expectedReward = (MIN_BOND * BigInt(SLASHER_REWARD_BPS)) / 10_000n;
+    const expectedToTreasury = MIN_BOND - expectedReward;
     const treasuryBalBefore = await ethers.provider.getBalance(treasury.address);
     await expect(contract.connect(other).slashNoReveal(built.commitId))
       .to.emit(contract, "IntentSlashed")
-      .withArgs(built.commitId, agent.address, MIN_BOND);
+      .withArgs(built.commitId, agent.address, MIN_BOND, expectedReward, other.address);
 
     expect(await contract.bondBalance(agent.address)).to.equal(0n);
     const treasuryBalAfter = await ethers.provider.getBalance(treasury.address);
-    expect(treasuryBalAfter - treasuryBalBefore).to.equal(MIN_BOND);
+    expect(treasuryBalAfter - treasuryBalBefore).to.equal(expectedToTreasury);
 
     // Cannot slash twice.
     await expect(contract.connect(other).slashNoReveal(built.commitId)).to.be.revertedWithCustomError(
       contract,
       "AlreadySlashed"
     );
+  });
+
+  it("pays the caller of slashNoReveal a reward, gas-cost-adjusted, not just the treasury", async function () {
+    const { contract, agent, other } = await loadFixture(deploy);
+    await alignToFreshEpoch(COMMIT_WINDOW);
+    await contract.connect(agent).depositBond({ value: MIN_BOND });
+    const intentData = ethers.AbiCoder.defaultAbiCoder().encode(["string"], ["swap 1 ETH -> USDC"]);
+    const built = buildIntent(agent.address, intentData, 1);
+    await contract.connect(agent).commitIntent(built.commitId, built.commitHash);
+
+    const epoch = await contract.currentEpoch();
+    await time.increaseTo(await contract.revealCloseTimeOf(epoch));
+
+    const expectedReward = (MIN_BOND * BigInt(SLASHER_REWARD_BPS)) / 10_000n;
+    const otherBalBefore = await ethers.provider.getBalance(other.address);
+    const tx = await contract.connect(other).slashNoReveal(built.commitId);
+    const receipt = await tx.wait();
+    const gasCost = receipt!.gasUsed * receipt!.gasPrice;
+    const otherBalAfter = await ethers.provider.getBalance(other.address);
+
+    // other's balance change = +reward - gas it spent calling this itself.
+    expect(otherBalAfter - otherBalBefore + gasCost).to.equal(expectedReward);
+  });
+
+  it("sends the whole penalty to treasury when slasherRewardBps is 0 (reward is opt-in, not forced)", async function () {
+    const [treasury, agent, other, guardian] = await ethers.getSigners();
+    const Contract = await ethers.getContractFactory("IntentCommitReveal");
+    const contract = await Contract.deploy(
+      COMMIT_WINDOW,
+      REVEAL_DELAY,
+      REVEAL_WINDOW,
+      MIN_BOND,
+      treasury.address,
+      guardian.address,
+      0 // slasherRewardBps
+    );
+    await contract.waitForDeployment();
+
+    await alignToFreshEpoch(COMMIT_WINDOW);
+    await contract.connect(agent).depositBond({ value: MIN_BOND });
+    const intentData = ethers.AbiCoder.defaultAbiCoder().encode(["string"], ["swap 1 ETH -> USDC"]);
+    const built = buildIntent(agent.address, intentData, 1);
+    await contract.connect(agent).commitIntent(built.commitId, built.commitHash);
+
+    const epoch = await contract.currentEpoch();
+    await time.increaseTo(await contract.revealCloseTimeOf(epoch));
+
+    const treasuryBalBefore = await ethers.provider.getBalance(treasury.address);
+    await expect(contract.connect(other).slashNoReveal(built.commitId))
+      .to.emit(contract, "IntentSlashed")
+      .withArgs(built.commitId, agent.address, MIN_BOND, 0n, other.address);
+    const treasuryBalAfter = await ethers.provider.getBalance(treasury.address);
+    expect(treasuryBalAfter - treasuryBalBefore).to.equal(MIN_BOND);
   });
 
   it("rejects slashing a commitId that was never committed", async function () {
@@ -973,6 +1041,35 @@ describe("IntentCommitReveal", function () {
       const stored = await contract.commitments(built.commitId);
       expect(stored.revealed).to.equal(true);
     });
+
+    it("a malicious slasher cannot reenter slashNoReveal from its own reward payout to double-slash", async function () {
+      const { contract, agent } = await loadFixture(deploy);
+      const contractAddr = await contract.getAddress();
+      await alignToFreshEpoch(COMMIT_WINDOW);
+      await contract.connect(agent).depositBond({ value: MIN_BOND });
+      const intentData = ethers.AbiCoder.defaultAbiCoder().encode(["string"], ["reentrant slasher target"]);
+      const built = buildIntent(agent.address, intentData, 1);
+      await contract.connect(agent).commitIntent(built.commitId, built.commitHash);
+
+      const epoch = await contract.currentEpoch();
+      await time.increaseTo(await contract.revealCloseTimeOf(epoch));
+
+      const Slasher = await ethers.getContractFactory("ReentrantSlasher");
+      const slasher = await Slasher.deploy(contractAddr);
+      await slasher.waitForDeployment();
+
+      const contractBalBefore = await ethers.provider.getBalance(contractAddr);
+      await slasher.attack(built.commitId);
+
+      // Reentrant attempt must have reverted (AlreadySlashed) — state was
+      // flipped before either external transfer, per checks-effects-
+      // interactions — so only ONE reward + ONE treasury payout ever left
+      // the contract, not two.
+      expect(await slasher.reentryReverted()).to.equal(true);
+      expect((await contract.commitments(built.commitId)).slashed).to.equal(true);
+      const contractBalAfter = await ethers.provider.getBalance(contractAddr);
+      expect(contractBalBefore - contractBalAfter).to.equal(MIN_BOND); // exactly one commitment's penalty left, not more
+    });
   });
 
   describe("bond locking (fix for the withdraw-before-slash gap)", function () {
@@ -1026,13 +1123,14 @@ describe("IntentCommitReveal", function () {
       const epoch = await contract.currentEpoch();
       await time.increaseTo(await contract.revealCloseTimeOf(epoch));
 
+      const expectedReward = (MIN_BOND * BigInt(SLASHER_REWARD_BPS)) / 10_000n;
       const treasuryBalBefore = await ethers.provider.getBalance(treasury.address);
       await expect(contract.connect(other).slashNoReveal(built.commitId))
         .to.emit(contract, "IntentSlashed")
-        .withArgs(built.commitId, agent.address, MIN_BOND); // full penalty now, not 0
+        .withArgs(built.commitId, agent.address, MIN_BOND, expectedReward, other.address); // full penalty now, not 0
       const treasuryBalAfter = await ethers.provider.getBalance(treasury.address);
 
-      expect(treasuryBalAfter - treasuryBalBefore).to.equal(MIN_BOND);
+      expect(treasuryBalAfter - treasuryBalBefore).to.equal(MIN_BOND - expectedReward);
       expect(await contract.lockedBond(agent.address)).to.equal(0n); // released after slash too
     });
 

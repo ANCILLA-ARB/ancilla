@@ -33,7 +33,8 @@ describe("relay-server app", function () {
       REVEAL_WINDOW,
       MIN_BOND,
       treasury.address,
-      guardian.address
+      guardian.address,
+      1000 // slasherRewardBps — not exercised by this suite, matches other test files' default
     );
     await contract.waitForDeployment();
 

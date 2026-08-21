@@ -52,6 +52,14 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 ///         commitment can always still resolve it. Single immutable
 ///         address for now, same documented MVP caveat as
 ///         IntentCommitReveal's.
+///
+///         ECONOMIC HARDENING: `slasherRewardBps` pays whoever calls
+///         `slashNoReveal` a cut of the penalty instead of sending 100% to
+///         `treasury` — same reasoning as IntentCommitReveal's identical
+///         field: permissionless-but-unrewarded enforcement in practice
+///         means nobody bothers. See IntentCommitReveal.sol's header for
+///         the fuller writeup, including the flat-bond-vs-notional-value
+///         limitation this does NOT fix.
 contract AncillaSwapHook is BaseHook, Pausable {
     // ---------------------------------------------------------------------
     // Config — identical shape to IntentCommitReveal's constructor params.
@@ -63,6 +71,10 @@ contract AncillaSwapHook is BaseHook, Pausable {
     uint256 public immutable minBond;
     address public immutable treasury;
     address public immutable guardian;
+    /// @notice Share of a slashed penalty (basis points out of 10,000)
+    ///         paid to whoever calls `slashNoReveal` — same reasoning as
+    ///         IntentCommitReveal's identical field.
+    uint16 public immutable slasherRewardBps;
 
     // ---------------------------------------------------------------------
     // State
@@ -100,7 +112,9 @@ contract AncillaSwapHook is BaseHook, Pausable {
     event IntentSwapExecuted(
         bytes32 indexed commitId, address indexed agent, address tokenIn, uint256 amountIn, uint256 amountOut
     );
-    event IntentSlashed(bytes32 indexed commitId, address indexed agent, uint256 amount);
+    event IntentSlashed(
+        bytes32 indexed commitId, address indexed agent, uint256 totalPenalty, uint256 slasherReward, address slasher
+    );
 
     error BondTooLow(uint256 have, uint256 need);
     error CommitAlreadyExists();
@@ -133,18 +147,21 @@ contract AncillaSwapHook is BaseHook, Pausable {
         uint64 _revealWindowSeconds,
         uint256 _minBond,
         address _treasury,
-        address _guardian
+        address _guardian,
+        uint16 _slasherRewardBps
     ) BaseHook(_manager) {
         require(_commitWindowSeconds > 0, "commitWindow=0");
         require(_revealWindowSeconds > 0, "revealWindow=0");
         require(_treasury != address(0), "treasury=0");
         require(_guardian != address(0), "guardian=0");
+        require(_slasherRewardBps <= 10_000, "slasherRewardBps>100%");
         commitWindowSeconds = _commitWindowSeconds;
         revealDelaySeconds = _revealDelaySeconds;
         revealWindowSeconds = _revealWindowSeconds;
         minBond = _minBond;
         treasury = _treasury;
         guardian = _guardian;
+        slasherRewardBps = _slasherRewardBps;
     }
 
     function pause() external {
@@ -260,12 +277,19 @@ contract AncillaSwapHook is BaseHook, Pausable {
         if (penalty > bal) penalty = bal;
         bondBalance[c.agent] = bal - penalty;
 
-        if (penalty > 0) {
-            (bool ok,) = treasury.call{value: penalty}("");
-            require(ok, "slash transfer failed");
+        uint256 reward = (penalty * slasherRewardBps) / 10_000;
+        uint256 toTreasury = penalty - reward;
+
+        if (toTreasury > 0) {
+            (bool okTreasury,) = treasury.call{value: toTreasury}("");
+            require(okTreasury, "slash transfer failed");
+        }
+        if (reward > 0) {
+            (bool okReward,) = msg.sender.call{value: reward}("");
+            require(okReward, "slasher reward transfer failed");
         }
 
-        emit IntentSlashed(commitId, c.agent, penalty);
+        emit IntentSlashed(commitId, c.agent, penalty, reward, msg.sender);
     }
 
     // ---------------------------------------------------------------------
