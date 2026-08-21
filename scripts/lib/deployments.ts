@@ -127,6 +127,26 @@ export function loadTokenStackDeployment(networkName: string): TokenStackDeploym
   };
 }
 
+export interface VoteEscrowDeployment {
+  address: string;
+  stakingToken: string;
+  minLockSeconds: number;
+  maxLockSeconds: number;
+}
+
+/** Reads the AncillaVoteEscrow entry written by
+ *  scripts/deploy-vote-escrow.ts. */
+export function loadVoteEscrowDeployment(networkName: string): VoteEscrowDeployment {
+  const data = readDeploymentsFile(networkName);
+  const entry = data?.contracts?.AncillaVoteEscrow;
+  if (!entry?.address) {
+    throw new Error(
+      `deployments/${networkName}.json has no contracts.AncillaVoteEscrow entry — run \`npx hardhat run scripts/deploy-vote-escrow.ts --network ${networkName}\` first`
+    );
+  }
+  return entry as VoteEscrowDeployment;
+}
+
 export interface AncillaHookDeployment {
   address: string;
   salt: string;

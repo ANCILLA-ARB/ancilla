@@ -28,6 +28,8 @@
     "deploy-token:sepolia": "hardhat run scripts/deploy-token.ts --network arbitrumSepolia",
     "demo-governor:sepolia": "hardhat run scripts/demo-governor.ts --network arbitrumSepolia",
     "demo-staking:sepolia": "hardhat run scripts/demo-staking.ts --network arbitrumSepolia",
+    "deploy-vote-escrow:sepolia": "hardhat run scripts/deploy-vote-escrow.ts --network arbitrumSepolia",
+    "demo-vote-escrow:sepolia": "hardhat run scripts/demo-vote-escrow.ts --network arbitrumSepolia",
     "deploy-mock-executor:sepolia": "hardhat run scripts/deploy-mock-executor.ts --network arbitrumSepolia",
     "relay-server:live-e2e": "hardhat run scripts/relay-server-live-e2e.ts --network arbitrumSepolia",
     "relay-server": "ts-node relay-server/index.ts",

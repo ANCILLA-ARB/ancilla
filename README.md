@@ -168,8 +168,11 @@ deck.
   (**7**, a real end-to-end propose → vote → queue → execute cycle against
   a live `TimelockController`, not a mocked one), and
   [`test/AncillaStaking.test.ts`](test/AncillaStaking.test.ts) (**12**,
-  including exact pro-rata revenue splitting between unequal stakers).
-  **176 tests total, all passing** (re-run 3x
+  including exact pro-rata revenue splitting between unequal stakers), and
+  [`test/AncillaVoteEscrow.test.ts`](test/AncillaVoteEscrow.test.ts)
+  (**14**, lock-weighted revenue splitting — a 2x-duration lock earning
+  exactly 2x the same distribution as an equal-amount, half-duration one).
+  **190 tests total, all passing** (re-run 3x
   consecutively to rule out flakiness). 100% statement/line/function
   coverage, 94%+ branch coverage on every core contract except the two v4
   router contracts (`npm run coverage`
@@ -198,7 +201,7 @@ Run it yourself:
 ```bash
 npm install
 npm run compile
-npm test              # 176 tests (46 + 10 relay-server + 20 swap executor + 25 treasury multisig + 24 v4 hook + 23 guardian multisig + 9 token + 7 governor + 12 staking)
+npm test              # 190 tests (46 + 10 relay-server + 20 swap executor + 25 treasury multisig + 24 v4 hook + 23 guardian multisig + 9 token + 7 governor + 12 staking + 14 vote escrow)
 npm run coverage      # statement/branch/function/line coverage report
 npm run gas-report    # per-function gas cost table
 npm run size          # deployed bytecode size vs the 24KB EIP-170 limit
@@ -252,7 +255,7 @@ npm run size          # deployed bytecode size vs the 24KB EIP-170 limit
   remaining mainnet-readiness items first (see below) and treat a
   professional audit as the final gate before any deployment that holds
   real value, rather than auditing code that's still actively changing.
-  Everything in this repo is self-reviewed in the meantime: 176 unit tests,
+  Everything in this repo is self-reviewed in the meantime: 190 unit tests,
   100% line coverage / 94%+ branch
   coverage on the core contract, three live testnet demos plus a local
   relay-server E2E run, and two deliberate self-attack tests (reentrancy
@@ -336,6 +339,7 @@ them stale — caught and fixed in a cleanup pass, not before.)
 | `AncillaTimelock` (plain OpenZeppelin `TimelockController`) | [`0xDA0A6b4a9c37046455Cf268ACF24C05b8Cb770dA`](https://sepolia.arbiscan.io/address/0xDA0A6b4a9c37046455Cf268ACF24C05b8Cb770dA) |
 | `AncillaGovernor` | [`0x622E54Cf8eCdB151d1c73cd4FEbAE61D730fA898`](https://sepolia.arbiscan.io/address/0x622E54Cf8eCdB151d1c73cd4FEbAE61D730fA898) |
 | `AncillaStaking` (ANCILLA revenue-share) | [`0xa35a54f9a248d0AA2A0255AA214E536467CA7335`](https://sepolia.arbiscan.io/address/0xa35a54f9a248d0AA2A0255AA214E536467CA7335) |
+| `AncillaVoteEscrow` (lock-weighted revenue-share) | [`0x9D6cc7aaBc9419973E7dC2e0e27327d785B4DC89`](https://sepolia.arbiscan.io/address/0x9D6cc7aaBc9419973E7dC2e0e27327d785B4DC89) |
 
 `IntentCommitReveal` deployed with `commitWindowSeconds=120`,
 `revealDelaySeconds=30`, `revealWindowSeconds=120`, `minBond=0.001 ETH`,
@@ -582,7 +586,7 @@ discovered later.
 
 A separate system from everything above — `IntentCommitReveal` and
 `AncillaSwapHook` don't depend on any of this, and don't reference it.
-Three pieces, each proven live on Arbitrum Sepolia, not just deployed:
+Four pieces, each proven live on Arbitrum Sepolia, not just deployed:
 
 - [`contracts/AncillaToken.sol`](contracts/AncillaToken.sol) — the
   ANCILLA ERC20. `ERC20Votes` (on-chain vote-weight checkpoints) +
@@ -640,6 +644,44 @@ Three pieces, each proven live on Arbitrum Sepolia, not just deployed:
   — a real 2-of-3 treasury withdrawal sent to the staking contract was
   picked up as revenue and paid out to the staker, verified via real ETH
   balance delta, not the return value.
+- [`contracts/AncillaVoteEscrow.sol`](contracts/AncillaVoteEscrow.sol) —
+  added after studying how comparable live protocols actually tokenize
+  commitment: 1inch Fusion's resolvers bond staked 1INCH weighted by lock
+  duration ("Unicorn Power," 1 month to 2 years) to earn a share of
+  resolver fees, the same pattern Curve (veCRV) and Balancer (veBAL) built
+  their whole token models around. `AncillaVoteEscrow` is that pattern,
+  additive to `AncillaStaking` rather than a replacement for it: lock
+  ANCILLA for 4 weeks to 2 years, `weight = amount * lockDuration /
+  MAX_LOCK`, and revenue funneled here (same `receive()`-from-the-treasury-
+  multisig pattern as `AncillaStaking`) pays out by weight, not raw amount
+  — a 2-year lock earns proportionally more per token than a 4-week one.
+  Deliberately NOT wired into `AncillaGovernor`'s voting power yet —
+  giving a decaying, lockable balance real ERC-6372 checkpoint history
+  correct enough for live governance snapshots is a harder, separate
+  problem than this pass's scope; the name is forward-looking on that.
+  **Proven live** (`npm run demo-vote-escrow:sepolia`) — two wallets
+  locked the identical amount of ANCILLA, one for twice the other's
+  duration, and the longer lock earned almost exactly 2x the identical
+  treasury distribution (ratio 2.000, verified independently). Lock
+  maturity/withdrawal itself is proven with Hardhat's simulated time in
+  [`test/AncillaVoteEscrow.test.ts`](test/AncillaVoteEscrow.test.ts), not
+  live — `MIN_LOCK` is 4 real weeks, genuinely impractical to sit through
+  in a demo script.
+  **Real bug found here, caught by CI, not by the new tests themselves**:
+  a test calling `time.increase()` to fast-forward past a 2-year lock's
+  maturity permanently moves the shared Hardhat node's clock forward by
+  that much — and unlike `loadFixture`'s own per-test snapshot/revert,
+  nothing undoes that before mocha moves on to the *next test file* in
+  the same `npx hardhat test` run. That pushed `relay-server.test.ts`'s
+  real-`Date.now()`-based signature deadlines (already given a
+  1,000,000-second buffer specifically for small clock drift — see that
+  file) far enough out of range to fail with `SignatureExpired`, despite
+  those tests having nothing to do with ANCILLA. Passed in isolation,
+  failed only as part of the full suite — the tell that it was shared
+  state leaking across files, not a real defect in either contract.
+  Fixed by wrapping `AncillaVoteEscrow.test.ts` in a file-level
+  `takeSnapshot()`/`restore()` so its time manipulation, however large,
+  never escapes its own tests.
 
 **What this does NOT do.** The token currently has no actual role in the
 protocol beyond governance and revenue-share — it is not (yet) usable as
@@ -899,7 +941,7 @@ checks rather than relying on manual review alone:
 
 | Command | What it shows |
 |---|---|
-| `npm test` | 176 tests, run 3x consecutively during development to rule out flakiness |
+| `npm test` | 190 tests, run 3x consecutively during development to rule out flakiness |
 | `npm run coverage` | Istanbul/solidity-coverage report — 100% statements/lines/functions across every contract, 94-100% branches on each core contract (`IntentCommitReveal` 94.74%, `AncillaSwapPool` 94.12%, `AncillaTreasuryMultisig` 95.45%, `SwapExecutor` 100%, `AncillaSwapHook` 72%). The `ecrecover`-returns-zero-address branch, once (wrongly) written off here as "impractical to force deliberately," turned out not to be — a signature with `r=0` (not a valid secp256k1 x-coordinate) reliably makes `ecrecover` return the zero address, and is now an actual test. What's left uncovered is genuinely dead by design: defensive fallback code in `slashNoReveal` that the bond-locking fix made intentionally unreachable, `AncillaSwapPool.swap()`'s own equivalent guard, which the AMM formula's own math makes unreachable (see "Sixth" bug), and — honestly, not yet chased down — some delta-sign edge branches in `AncillaHookRouter`/`AncillaLiquidityRouter` (e.g. a swap that moves zero of one currency) that every test so far happens not to hit. |
 | `npm run gas-report` | Per-function gas cost table (e.g. `commitIntent` ~78–95k gas, `revealIntentViaRelay` ~52k gas) |
 | `npm run size` | Deployed bytecode size — `IntentCommitReveal` is 7.10 KiB, `AncillaSwapHook` 6.24 KiB, `AncillaSwapPool` 2.14 KiB, `AncillaTreasuryMultisig` 2.26 KiB, `AncillaHookRouter` 2.77 KiB, `AncillaLiquidityRouter` 2.28 KiB, `SwapExecutor` 1.23 KiB — all well under the 24 KiB EIP-170 limit Arbitrum also enforces (Uniswap's own `PoolManager`, at ~19.3 KiB, is the one contract in this stack close to that ceiling — and it isn't ours; it's already deployed and live) |
