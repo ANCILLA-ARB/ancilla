@@ -21,6 +21,7 @@ deck.
 - [What actually exists right now](#what-actually-exists-right-now-verified-not-claimed)
 - [What this does NOT do](#what-this-does-not-do-read-this-before-pitching-it-to-anyone)
 - [Roadmap](#roadmap-from-the-earlier-discussion-for-context)
+- [Mainnet readiness](#mainnet-readiness) — what's done, what isn't, before this touches real value
 - [Deploying to Arbitrum Sepolia](#deploying-to-arbitrum-sepolia-testnet)
 - [Contract parameters explained](#contract-parameters-explained)
 - [Bugs we hit and fixed](#a-real-bug-we-hit-and-fixed-kept-here-on-purpose-not-swept-under-the-rug) — 6 real ones, kept on the record, not cleaned up out of the story
@@ -55,6 +56,25 @@ deck.
   both files for the deliberate simplifications (no LP tokens, single pair,
   no MEV protection on the swap price itself — only on when/who submits the
   reveal).
+- **[`contracts/AncillaTreasuryMultisig.sol`](contracts/AncillaTreasuryMultisig.sol)**
+  — a minimal M-of-N multisig, built to close the single biggest mainnet
+  blocker called out below: `IntentCommitReveal.treasury` is `immutable`,
+  and every deployment so far has pointed it at one EOA — meaning one lost
+  or compromised key would permanently own every slashed bond, forever,
+  with no way to fix it after the fact. This contract requires a
+  configurable threshold of owners to confirm a withdrawal before any ETH
+  moves. Deliberately scoped to ETH custody + withdrawal approval only (no
+  arbitrary call execution, no owner rotation) to keep it small enough to
+  reason about directly. **Proven live on Arbitrum Sepolia**
+  (`npm run demo-treasury:sepolia`, [`scripts/demo-treasury.ts`](scripts/demo-treasury.ts))
+  — funded, a withdrawal proposed, confirmed rejected with only 1 of 2
+  required confirmations, then executed for the exact amount once the
+  second owner confirmed. **Not yet wired into a live `IntentCommitReveal`
+  deployment** — that only happens on `IntentCommitReveal`'s *next*
+  deployment, by pointing `treasury` at this contract's address instead of
+  an EOA; the currently-live `IntentCommitReveal` above still uses an EOA
+  treasury, unchanged, since `treasury` can't be edited after deployment.
+  See "Mainnet readiness" below.
 - [`sdk/intent.ts`](sdk/intent.ts) — the off-chain helper an agent operator
   calls to build a commitment (hash) before submitting `commitIntent()`.
 - **`revealIntentViaRelay(...)` and `commitIntentViaRelay(...)`** in the same
@@ -87,9 +107,16 @@ deck.
   covering the pool's AMM math, the executor, a deliberate reentrancy
   attack against the pool (via a purpose-built hook-having token — plain
   ERC20 has no hooks to exploit), and the full private-swap-intent
-  narrative end-to-end. **68 tests total, all passing** (re-run 3x
+  narrative end-to-end, and
+  [`test/AncillaTreasuryMultisig.test.ts`](test/AncillaTreasuryMultisig.test.ts)
+  — **25 more** covering the multisig's own constructor validation,
+  propose/confirm/revoke/execute lifecycle, threshold enforcement, a
+  failed-transfer case that proves a bad withdrawal reverts fully instead
+  of getting stuck half-executed, and a deliberate reentrancy attack from
+  a malicious withdrawal recipient that is also a listed owner. **93 tests
+  total, all passing** (re-run 3x
   consecutively to rule out flakiness). 100% statement/line/function
-  coverage, 95%+ branch coverage on every core contract (`npm run coverage`
+  coverage, 94%+ branch coverage on every core contract (`npm run coverage`
   — remaining gaps are documented, not hidden — see "Bugs we hit and
   fixed"). Covers: constructor input validation, bond requirement and
   bond-locking (see "Third bug"
@@ -115,7 +142,7 @@ Run it yourself:
 ```bash
 npm install
 npm run compile
-npm test              # 68 tests (38 + 10 relay-server + 20 swap executor)
+npm test              # 93 tests (38 + 10 relay-server + 20 swap executor + 25 treasury multisig)
 npm run coverage      # statement/branch/function/line coverage report
 npm run gas-report    # per-function gas cost table
 npm run size          # deployed bytecode size vs the 24KB EIP-170 limit
@@ -156,11 +183,21 @@ npm run size          # deployed bytecode size vs the 24KB EIP-170 limit
 - **The bond/slashing model is intentionally simple (MVP-grade).** Bond is
   now locked per-commitment (see "Third bug" below) so it can't be
   withdrawn out from under a pending reveal, but it's still a flat amount
-  per commitment, not a stake-weighted or reputation-scaled system, and the
-  treasury address is a single EOA in the deploy script — replace it with a
-  real multisig/DAO contract before any non-testnet use.
-- **No third-party security audit has been done.** Everything in this repo
-  is self-reviewed: 68 unit tests, 100% line coverage / 95%+ branch
+  per commitment, not a stake-weighted or reputation-scaled system. The
+  single-EOA-treasury gap is now closed at the contract level —
+  [`AncillaTreasuryMultisig`](contracts/AncillaTreasuryMultisig.sol) exists
+  and is proven live (see above) — but the *currently deployed*
+  `IntentCommitReveal` on Sepolia still points `treasury` at an EOA,
+  because that field is immutable and can only be set correctly on a fresh
+  deployment. See "Mainnet readiness" below for exactly what's done and
+  what isn't yet.
+- **No third-party security audit has been done — deliberately deferred,
+  not forgotten.** The current plan is to keep building and hardening the
+  remaining mainnet-readiness items first (see below) and treat a
+  professional audit as the final gate before any deployment that holds
+  real value, rather than auditing code that's still actively changing.
+  Everything in this repo is self-reviewed in the meantime: 93 unit tests,
+  100% line coverage / 94%+ branch
   coverage on the core contract, three live testnet demos plus a local
   relay-server E2E run, and two deliberate self-attack tests (reentrancy
   against `withdrawBond` and against the executor-callback path — both
@@ -185,6 +222,23 @@ npm run size          # deployed bytecode size vs the 24KB EIP-170 limit
 | 3 — Private RPC / relay so commits+reveals don't sit in the public mempool at all | 🟡 **partial**: both `commitIntentViaRelay` and `revealIntentViaRelay` (EIP-712 meta-tx) let a relay submit on the agent's behalf, breaking the agent↔tx-sender link — proven live on testnet (commit+reveal separately) and end-to-end through a real relay-server prototype over HTTP (locally), including surviving one relay instance being killed mid-flight (multi-relay redundancy, proven via `npm run relay-server:multi-e2e`). Still missing: a *hosted*, always-on relay deployment (not just runnable locally), and relay operator discovery/reputation (agents still have to already know which relay endpoints to trust) — see [`relay-server/README.md`](relay-server/README.md). |
 | 4 — "Refereed dual-node execution" (as originally scoped: cross-checking non-deterministic AI computation) | ⚪️ **doesn't apply to this architecture** — Ancilla's reveal step is fully deterministic (hash-bound at commit time via `keccak256(intentData, salt, agent) == commitHash`), so there's no non-deterministic computation inside the protocol for two nodes to disagree about and referee. Building a "referee" system here anyway would be feature theater, not a real fix. Multi-relay redundancy (row above) is the honest analog: it addresses the actual failure mode (one relay operator going down/censoring), not a fabricated one. |
 | 5 — Actual ZK proof of correct execution | ❌ research-stage, not committed to |
+
+## Mainnet readiness
+
+This is separate from the phase roadmap above — the phases are about
+*feature scope*; this is about what's needed before any deployment holds
+real value, not testnet ETH. Decided approach: build and harden the remaining items first, treat a
+third-party audit as the final gate right before a real deployment, not
+something to run against code that's still changing.
+
+| Item | Status |
+|---|---|
+| Treasury as a multisig, not a single EOA | ✅ [`AncillaTreasuryMultisig`](contracts/AncillaTreasuryMultisig.sol) built, 25 tests (including a deliberate reentrancy attack), **proven live on Sepolia** (`npm run demo-treasury:sepolia`) — a withdrawal correctly rejected with 1/2 confirmations, then executed for the exact amount with 2/2. **Not yet wired into a live `IntentCommitReveal`** — needs a fresh `IntentCommitReveal` deployment with `treasury` pointed at it, since the field is immutable. |
+| Emergency pause / circuit breaker | ⚪️ not started. `IntentCommitReveal` currently has no way to halt new commits if a critical bug is found post-deploy — the only recourse today would be deploying a replacement contract, which does nothing for funds already inside the old one. Next item planned. |
+| Economic model hardening (bond/slashing) | ⚪️ not started. Still a flat `minBond` per commitment — not stake-weighted, no reputation system. Needs deliberate adversarial stress-testing (not just more unit tests) before it's trusted with mainnet-scale value. |
+| Batching randomness | ⚪️ not started, low priority. `block.timestamp`-based epochs are fine for an MVP; not adversarially hardened against a sequencer biasing timestamps within Ethereum's allowed drift. |
+| Relay-server hosting | ⚪️ not started, non-blocking. The protocol doesn't depend on it — an agent can always call `commitIntent`/`revealIntent` directly — so this affects convenience/privacy-layer availability, not fund safety. |
+| Third-party security audit | ⏳ **deliberately deferred to the end, by design** — not skipped, not forgotten. |
 
 ## Deploying to Arbitrum Sepolia (testnet)
 
@@ -216,6 +270,7 @@ them stale — caught and fixed in a cleanup pass, not before.)
 | `TestTokenB` (aETH, mintable test ERC20) | [`0x9487f45a0fEf6C96d1571Ae7B32f020995710f73`](https://sepolia.arbiscan.io/address/0x9487f45a0fEf6C96d1571Ae7B32f020995710f73) |
 | `AncillaSwapPool` (constant-product AMM, aUSD/aETH) | [`0x3663a10bB68cEbe477843673385d5D97ea12cb0b`](https://sepolia.arbiscan.io/address/0x3663a10bB68cEbe477843673385d5D97ea12cb0b) |
 | `SwapExecutor` (real `IIntentExecutor`) | [`0x10896dDf2e5D5E9fbc2Eb3dd2C65719A86aaDc76`](https://sepolia.arbiscan.io/address/0x10896dDf2e5D5E9fbc2Eb3dd2C65719A86aaDc76) |
+| `AncillaTreasuryMultisig` (2-of-3, see "Mainnet readiness") | [`0xC5d4f69B53520DC5a625BA8197176E053C845800`](https://sepolia.arbiscan.io/address/0xC5d4f69B53520DC5a625BA8197176E053C845800) |
 
 Deployed with `commitWindowSeconds=120`, `revealDelaySeconds=30`,
 `revealWindowSeconds=120`, `minBond=0.001 ETH`. Source is not yet verified on
@@ -249,6 +304,18 @@ partway through this session, and topping up requires a manual faucet claim
   [reveal + real swap](https://sepolia.arbiscan.io/tx/0x58c076f8f5b52791b33311cc689efc7b266da529a131551e6733118110c53111).
   This closes what was, until now, the single biggest gap between "tested
   locally" and "the project's actual core narrative, proven live."
+- **Treasury multisig** (`npm run demo-treasury:sepolia`,
+  [`scripts/demo-treasury.ts`](scripts/demo-treasury.ts)) — verified live
+  against the `AncillaTreasuryMultisig` deployment above (owners: the
+  same two wallets used elsewhere in these demos, plus a third unfunded
+  placeholder address — this is a testnet configuration, not a real
+  owner set). Funded the multisig, proposed a withdrawal, confirmed
+  `executeWithdrawal` **reverts with only 1 of 2 required confirmations**,
+  then confirmed from a second owner and executed — the exact proposed
+  amount moved, verified by balance delta, not by trusting the return
+  value. Note the scope: this proves the multisig contract itself works
+  correctly live; it does **not** mean the currently-live
+  `IntentCommitReveal` is using it yet (see "Mainnet readiness").
 - **Bond locking** (`npm run demo-bond-lock:sepolia`, `scripts/demo-bond-lock.ts`)
   — verified live against **this exact deployment**
   (`0xb2a51326...5a91f3`). Commits an intent, then immediately attempts to
@@ -479,10 +546,10 @@ checks rather than relying on manual review alone:
 
 | Command | What it shows |
 |---|---|
-| `npm test` | 68 tests, run 3x consecutively during development to rule out flakiness |
-| `npm run coverage` | Istanbul/solidity-coverage report — 100% statements/lines/functions across every contract, 94-100% branches on each core contract (`IntentCommitReveal` 95.16%, `AncillaSwapPool` 94.12%, `SwapExecutor` 100%). The `ecrecover`-returns-zero-address branch, once (wrongly) written off here as "impractical to force deliberately," turned out not to be — a signature with `r=0` (not a valid secp256k1 x-coordinate) reliably makes `ecrecover` return the zero address, and is now an actual test. What's left uncovered is genuinely dead by design: defensive fallback code in `slashNoReveal` that the bond-locking fix made intentionally unreachable, and `AncillaSwapPool.swap()`'s own equivalent guard, which the AMM formula's own math makes unreachable (see "Sixth" bug). |
+| `npm test` | 93 tests, run 3x consecutively during development to rule out flakiness |
+| `npm run coverage` | Istanbul/solidity-coverage report — 100% statements/lines/functions across every contract, 94-100% branches on each core contract (`IntentCommitReveal` 95.16%, `AncillaSwapPool` 94.12%, `AncillaTreasuryMultisig` 95.45%, `SwapExecutor` 100%). The `ecrecover`-returns-zero-address branch, once (wrongly) written off here as "impractical to force deliberately," turned out not to be — a signature with `r=0` (not a valid secp256k1 x-coordinate) reliably makes `ecrecover` return the zero address, and is now an actual test. What's left uncovered is genuinely dead by design: defensive fallback code in `slashNoReveal` that the bond-locking fix made intentionally unreachable, and `AncillaSwapPool.swap()`'s own equivalent guard, which the AMM formula's own math makes unreachable (see "Sixth" bug). |
 | `npm run gas-report` | Per-function gas cost table (e.g. `commitIntent` ~78–95k gas, `revealIntentViaRelay` ~52k gas) |
-| `npm run size` | Deployed bytecode size — `IntentCommitReveal` is 6.31 KiB, `AncillaSwapPool` 2.19 KiB, `SwapExecutor` 1.26 KiB — all well under the 24 KiB EIP-170 limit Arbitrum also enforces |
+| `npm run size` | Deployed bytecode size — `IntentCommitReveal` is 6.31 KiB, `AncillaSwapPool` 2.19 KiB, `AncillaTreasuryMultisig` 2.95 KiB, `SwapExecutor` 1.26 KiB — all well under the 24 KiB EIP-170 limit Arbitrum also enforces |
 
 ### CI
 

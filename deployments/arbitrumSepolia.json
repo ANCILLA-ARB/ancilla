@@ -28,7 +28,16 @@
     "SwapExecutor": {
       "address": "0x10896dDf2e5D5E9fbc2Eb3dd2C65719A86aaDc76",
       "pool": "0x3663a10bB68cEbe477843673385d5D97ea12cb0b"
+    },
+    "AncillaTreasuryMultisig": {
+      "address": "0xC5d4f69B53520DC5a625BA8197176E053C845800",
+      "owners": [
+        "0x5d01654edC4C618947e054E541b1937b7D165975",
+        "0x1BF317e590408a7e48D01bA964Af937f428B9347",
+        "0x742d5065F85Cf6456D55522e211e422977B35042"
+      ],
+      "threshold": 2
     }
   },
-  "_comment": "Single source of truth for what's actually live on Arbitrum Sepolia. Values above verified directly on-chain (not copied from a deploy log) before this file was created. scripts/deploy.ts overwrites the IntentCommitReveal entry on every fresh deploy; scripts/deploy-swap.ts overwrites the TestTokenA/TestTokenB/AncillaSwapPool/SwapExecutor entries on every fresh deploy, without touching IntentCommitReveal; scripts/demo*.ts read from here instead of each hardcoding their own (previously inconsistent, some stale) copy of the address."
+  "_comment": "Single source of truth for what's actually live on Arbitrum Sepolia. Values above verified directly on-chain (not copied from a deploy log) before this file was created. scripts/deploy.ts overwrites the IntentCommitReveal entry on every fresh deploy; scripts/deploy-swap.ts overwrites the TestTokenA/TestTokenB/AncillaSwapPool/SwapExecutor entries on every fresh deploy, without touching IntentCommitReveal; scripts/deploy-treasury.ts overwrites the AncillaTreasuryMultisig entry on every fresh deploy — note that deploying a new multisig here does NOT retroactively wire it into IntentCommitReveal.treasury, since that field is immutable; scripts/demo*.ts read from here instead of each hardcoding their own (previously inconsistent, some stale) copy of the address."
 }
