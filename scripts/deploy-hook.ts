@@ -2,26 +2,27 @@ import { ethers, network } from "hardhat";
 import * as fs from "fs";
 import * as path from "path";
 import { mineHookAddress, HookFlags } from "./lib/hookMiner";
-import { loadSwapStackDeployment, loadTreasuryMultisigDeployment } from "./lib/deployments";
+import { loadSwapStackDeployment, loadTreasuryMultisigDeployment, loadGuardianMultisigDeployment } from "./lib/deployments";
 
 /**
  * Deploys the "Option A" v4 architecture — AncillaSwapHook,
  * AncillaHookRouter, and AncillaLiquidityRouter — against a REAL, already
  * live Uniswap v4 PoolManager (Uniswap deploys and operates this; Ancilla
  * never deploys or modifies it). Reuses the same aUSD/aETH tokens already
- * live from scripts/deploy-swap.ts, and wires the hook's treasury straight
- * to the already-deployed, already-proven-live AncillaTreasuryMultisig
- * (scripts/deploy-treasury.ts) — closing, for this deployment specifically,
- * the "not yet wired into a live deployment" gap noted in the README for
- * the older IntentCommitReveal (whose `treasury` is immutable and was set
- * to an EOA before the multisig existed).
+ * live from scripts/deploy-swap.ts, and wires both `treasury` and
+ * `guardian` straight to the already-deployed, already-proven-live
+ * AncillaTreasuryMultisig / AncillaGuardianMultisig (the SAME guardian
+ * multisig instance that already supervises IntentCommitReveal — see
+ * AncillaGuardianMultisig.sol's header for why one instance can guard
+ * multiple targets).
  *
  * Usage:
  *   npx hardhat run scripts/deploy-hook.ts --network arbitrumSepolia
  *
  * Requires deployments/<network>.json to already have TestTokenA/
- * TestTokenB (scripts/deploy-swap.ts) and AncillaTreasuryMultisig
- * (scripts/deploy-treasury.ts) populated.
+ * TestTokenB (scripts/deploy-swap.ts), AncillaTreasuryMultisig
+ * (scripts/deploy-treasury.ts), and AncillaGuardianMultisig
+ * (scripts/deploy-guardian.ts) populated.
  */
 
 const COMMIT_WINDOW_SECONDS = 120;
@@ -42,9 +43,11 @@ async function main() {
 
   const swapStack = loadSwapStackDeployment("arbitrumSepolia");
   const treasuryMultisig = loadTreasuryMultisigDeployment("arbitrumSepolia");
+  const guardianMultisig = loadGuardianMultisigDeployment("arbitrumSepolia");
   console.log("Reusing TestTokenA (aUSD):", swapStack.tokenA);
   console.log("Reusing TestTokenB (aETH):", swapStack.tokenB);
   console.log("Treasury (AncillaTreasuryMultisig):", treasuryMultisig.address);
+  console.log("Guardian (AncillaGuardianMultisig):", guardianMultisig.address);
   console.log("Uniswap v4 PoolManager (live, not ours):", UNISWAP_V4_POOL_MANAGER);
 
   // ---------------------------------------------------------------------
@@ -57,11 +60,13 @@ async function main() {
 
   // ---------------------------------------------------------------------
   console.log("\n[2/6] Mining a hook address encoding {beforeSwap, afterSwap}...");
-  // Same single-EOA MVP simplification documented in AncillaSwapHook.sol's
-  // header comment — replace with a dedicated pause-multisig before any
-  // real deployment. Pausing only ever blocks new commitIntent calls;
-  // reveal-and-swap keeps working even while paused.
-  const guardian = deployer.address;
+  // Reuses the SAME AncillaGuardianMultisig instance already wired into
+  // IntentCommitReveal.guardian — that contract deliberately doesn't bind
+  // to a single target at construction (see its header comment) so one
+  // guardian multisig can supervise pause/unpause across every Ancilla
+  // contract, not just one. Pausing only ever blocks new commitIntent
+  // calls; reveal-and-swap keeps working even while paused.
+  const guardian = guardianMultisig.address;
   // Same 10% default as deploy.ts — see AncillaSwapHook.sol's header
   // comment ("ECONOMIC HARDENING").
   const SLASHER_REWARD_BPS = 1000;

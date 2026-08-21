@@ -24,6 +24,7 @@
     "demo-slasher-reward:sepolia": "hardhat run scripts/demo-slasher-reward.ts --network arbitrumSepolia",
     "deploy-guardian:sepolia": "hardhat run scripts/deploy-guardian.ts --network arbitrumSepolia",
     "demo-guardian-multisig:sepolia": "hardhat run scripts/demo-guardian-multisig.ts --network arbitrumSepolia",
+    "demo-guardian-multisig-hook:sepolia": "hardhat run scripts/demo-guardian-multisig-hook.ts --network arbitrumSepolia",
     "deploy-mock-executor:sepolia": "hardhat run scripts/deploy-mock-executor.ts --network arbitrumSepolia",
     "relay-server:live-e2e": "hardhat run scripts/relay-server-live-e2e.ts --network arbitrumSepolia",
     "relay-server": "ts-node relay-server/index.ts",
