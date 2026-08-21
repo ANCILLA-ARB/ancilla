@@ -44,6 +44,26 @@ That part is yours to do, on whichever provider you choose.
   (unchanged, this project's own name) as the fallback for running it
   standalone. Verified by starting the compiled binary with `PORT=9999`
   and confirming it actually listens there instead of on 8787.
+- **Ninth bug, also found by an actual deploy, right after fixing the
+  above:** `/health` came back fine, but the very first real `/reveal`
+  POST returned a generic Express HTML 500 instead of JSON. Root cause:
+  the default `RELAY_STORE_PATH` (`relay-server/.queue-<port>.json`)
+  assumes a `relay-server/` directory exists relative to the process's
+  CWD — true locally, but **not** in this Docker image, which only ever
+  contains the compiled `dist/relay-server/`, never the source
+  `relay-server/` directory. `saveJobs()`'s `fs.writeFileSync` threw
+  `ENOENT` synchronously, uncaught. Only `/reveal` and the background
+  worker persist to disk, so `/commit` was never affected — matching
+  exactly what was observed live. Reproduced without Docker itself (still
+  unavailable in the sandbox this was diagnosed in) by hand-building a
+  directory containing only compiled `dist/relay-server/*.js` output and
+  confirming the identical failure, then the identical fix. Fixed by
+  calling `fs.mkdirSync(path.dirname(storePath), { recursive: true })`
+  before every write — a no-op if the directory already exists, so it's
+  safe locally too. If you're deploying this yourself, either set
+  `RELAY_STORE_PATH` explicitly to a real writable path (recommended —
+  see the persistence caveat below) or trust this default; both now
+  work.
 
 ## 1. Build and smoke-test the image locally
 

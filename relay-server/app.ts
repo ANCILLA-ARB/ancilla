@@ -1,6 +1,7 @@
 import express, { Express, Request, Response } from "express";
 import { Contract, Signer } from "ethers";
 import * as fs from "fs";
+import * as path from "path";
 
 /**
  * The relay-server's Express app + background worker, factored out of
@@ -92,6 +93,19 @@ function saveJobs(jobs: Map<string, RevealJob>, storePath: string | undefined) {
   for (const [commitId, job] of jobs.entries()) {
     serializable[commitId] = { ...job, deadline: job.deadline.toString() };
   }
+  // The default STORE_PATH (relay-server/.queue-<port>.json, see index.ts)
+  // assumes a `relay-server/` directory exists relative to the process's
+  // CWD — true when run locally via `ts-node relay-server/index.ts` from
+  // the repo root, but NOT true in the Docker runtime image, which only
+  // ever contains the compiled `dist/relay-server/`, never the source
+  // `relay-server/` directory. Without this, the very first reveal POSTed
+  // to a deployed instance threw ENOENT synchronously inside this
+  // synchronous fs.writeFileSync — uncaught, so Express's default error
+  // handler returned a generic HTML 500 instead of a JSON error, which is
+  // exactly what a live Railway deployment hit. mkdirSync recursive is a
+  // no-op if the directory already exists, so this is safe everywhere,
+  // not just in a container.
+  fs.mkdirSync(path.dirname(storePath), { recursive: true });
   fs.writeFileSync(storePath, JSON.stringify(serializable, null, 2));
 }
 

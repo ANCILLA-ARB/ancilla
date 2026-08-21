@@ -170,3 +170,25 @@ npm run relay-server:multi-e2e
    reading `PORT` first when present, falling back to `RELAY_PORT`
    (unchanged) for running it standalone — see
    [`DEPLOYMENT.md`](DEPLOYMENT.md).
+8. **Also found by an actual deploy, right after fixing #7:** `/health`
+   came back fine on the live Railway instance, but the very first real
+   `/reveal` POST returned a generic Express HTML 500 page instead of
+   JSON. Root cause: the default queue-store path
+   (`relay-server/.queue-<port>.json`, see `index.ts`) assumes a
+   `relay-server/` directory exists relative to the process's CWD — true
+   locally (`ts-node relay-server/index.ts` run from the repo root), but
+   **not** true in the Docker runtime image, which only ever contains the
+   compiled `dist/relay-server/`, never the source `relay-server/`
+   directory. `saveJobs()`'s `fs.writeFileSync` threw `ENOENT`
+   synchronously, uncaught, so Express's default handler returned its
+   generic HTML error page instead of a JSON one — `/commit` never hits
+   this path (it doesn't persist to disk), only `/reveal` and the
+   background worker do, which is exactly what was observed. Reproduced
+   without Docker itself (unavailable in the sandbox this was diagnosed
+   in) by hand-building a directory containing only compiled
+   `dist/relay-server/*.js` — no source tree, no local `node_modules`
+   (worked around with `NODE_PATH` pointed at the real one) — and
+   confirming the exact same failure, then the exact same fix. Fixed by
+   calling `fs.mkdirSync(path.dirname(storePath), { recursive: true })`
+   before every write; a no-op when the directory already exists, so it's
+   safe locally too.
