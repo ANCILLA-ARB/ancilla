@@ -24,6 +24,7 @@ deck.
 - [Mainnet readiness](#mainnet-readiness) — what's done, what isn't, before this touches real value
 - [Deploying to Arbitrum Sepolia](#deploying-to-arbitrum-sepolia-testnet)
 - [Uniswap v4 hook architecture](#uniswap-v4-hook-architecture-option-a) — a second, parallel architecture gating a real Uniswap v4 pool instead of the standalone AMM, proven live
+- [ANCILLA token & governance](#ancilla-token--governance) — a separate token/DAO system, proven live, with what it does not do yet spelled out
 - [Contract parameters explained](#contract-parameters-explained)
 - [Bugs we hit and fixed](#a-real-bug-we-hit-and-fixed-kept-here-on-purpose-not-swept-under-the-rug) — 7 real ones, kept on the record, not cleaned up out of the story
 - [Project quality tooling](#project-quality-tooling) — coverage, gas, CI
@@ -160,7 +161,15 @@ deck.
   on both contracts, including a live-target integration test (a real
   `IntentCommitReveal` instance actually pausing/unpausing through it, not
   a mock) and a test proving a single confirmation is provably not enough
-  to execute. **148 tests total, all passing** (re-run 3x
+  to execute, and three more files covering the ANCILLA token/governance
+  system — [`test/AncillaToken.test.ts`](test/AncillaToken.test.ts) (**9**,
+  including cap enforcement and that voting power tracks delegation, not
+  raw balance), [`test/AncillaGovernor.test.ts`](test/AncillaGovernor.test.ts)
+  (**7**, a real end-to-end propose → vote → queue → execute cycle against
+  a live `TimelockController`, not a mocked one), and
+  [`test/AncillaStaking.test.ts`](test/AncillaStaking.test.ts) (**12**,
+  including exact pro-rata revenue splitting between unequal stakers).
+  **176 tests total, all passing** (re-run 3x
   consecutively to rule out flakiness). 100% statement/line/function
   coverage, 94%+ branch coverage on every core contract except the two v4
   router contracts (`npm run coverage`
@@ -189,7 +198,7 @@ Run it yourself:
 ```bash
 npm install
 npm run compile
-npm test              # 148 tests (46 + 10 relay-server + 20 swap executor + 25 treasury multisig + 24 v4 hook + 23 guardian multisig)
+npm test              # 176 tests (46 + 10 relay-server + 20 swap executor + 25 treasury multisig + 24 v4 hook + 23 guardian multisig + 9 token + 7 governor + 12 staking)
 npm run coverage      # statement/branch/function/line coverage report
 npm run gas-report    # per-function gas cost table
 npm run size          # deployed bytecode size vs the 24KB EIP-170 limit
@@ -243,7 +252,7 @@ npm run size          # deployed bytecode size vs the 24KB EIP-170 limit
   remaining mainnet-readiness items first (see below) and treat a
   professional audit as the final gate before any deployment that holds
   real value, rather than auditing code that's still actively changing.
-  Everything in this repo is self-reviewed in the meantime: 148 unit tests,
+  Everything in this repo is self-reviewed in the meantime: 176 unit tests,
   100% line coverage / 94%+ branch
   coverage on the core contract, three live testnet demos plus a local
   relay-server E2E run, and two deliberate self-attack tests (reentrancy
@@ -323,6 +332,10 @@ them stale — caught and fixed in a cleanup pass, not before.)
 | `AncillaLiquidityRouter` | [`0x2f3Da20ff6f6a82C2D47d32aB5d09534c3f07c43`](https://sepolia.arbiscan.io/address/0x2f3Da20ff6f6a82C2D47d32aB5d09534c3f07c43) |
 | `AncillaGuardianMultisig` (2-of-3, shared guardian for both `IntentCommitReveal` and `AncillaSwapHook` above) | [`0x26E1A66E96296125c5C04fB90c64D167e27694c1`](https://sepolia.arbiscan.io/address/0x26E1A66E96296125c5C04fB90c64D167e27694c1) |
 | Uniswap v4 `PoolManager` (Uniswap's, not ours) | [`0xFB3e0C6F74eB1a21CC1Da29aeC80D2Dfe6C9a317`](https://sepolia.arbiscan.io/address/0xFB3e0C6F74eB1a21CC1Da29aeC80D2Dfe6C9a317) |
+| `AncillaToken` (ANCILLA — see "ANCILLA token & governance") | [`0xaC3fa7eC9b277D677145CdF6B7F551D0cd204182`](https://sepolia.arbiscan.io/address/0xaC3fa7eC9b277D677145CdF6B7F551D0cd204182) |
+| `AncillaTimelock` (plain OpenZeppelin `TimelockController`) | [`0xDA0A6b4a9c37046455Cf268ACF24C05b8Cb770dA`](https://sepolia.arbiscan.io/address/0xDA0A6b4a9c37046455Cf268ACF24C05b8Cb770dA) |
+| `AncillaGovernor` | [`0x622E54Cf8eCdB151d1c73cd4FEbAE61D730fA898`](https://sepolia.arbiscan.io/address/0x622E54Cf8eCdB151d1c73cd4FEbAE61D730fA898) |
+| `AncillaStaking` (ANCILLA revenue-share) | [`0xa35a54f9a248d0AA2A0255AA214E536467CA7335`](https://sepolia.arbiscan.io/address/0xa35a54f9a248d0AA2A0255AA214E536467CA7335) |
 
 `IntentCommitReveal` deployed with `commitWindowSeconds=120`,
 `revealDelaySeconds=30`, `revealWindowSeconds=120`, `minBond=0.001 ETH`,
@@ -565,6 +578,87 @@ ported to `AncillaSwapHook`** — every commit and reveal-and-swap here goes
 through the agent's own wallet directly. Flagged here on purpose, not
 discovered later.
 
+## ANCILLA token & governance
+
+A separate system from everything above — `IntentCommitReveal` and
+`AncillaSwapHook` don't depend on any of this, and don't reference it.
+Three pieces, each proven live on Arbitrum Sepolia, not just deployed:
+
+- [`contracts/AncillaToken.sol`](contracts/AncillaToken.sol) — the
+  ANCILLA ERC20. `ERC20Votes` (on-chain vote-weight checkpoints) +
+  `ERC20Permit` (gasless approvals) + `ERC20Capped` (hard, immutable
+  supply cap — currently 1,000,000,000 ANCILLA, a round placeholder, not
+  a tokenomics decision). `owner` can mint up to the cap; ownership is
+  meant to move from an EOA to `AncillaTimelock` once initial
+  distribution is actually decided — `scripts/deploy-token.ts`
+  deliberately does NOT do that transfer itself (see its own header
+  comment for why), so nothing about allocation gets decided implicitly
+  by a deploy script.
+  **Real bug found here, not caught by any test until deployed live**:
+  `ERC20Votes`' default voting clock runs on block *number*. On
+  Arbitrum, the `block.number` a contract sees is the **L1 Ethereum**
+  block height, not the L2 block count `ethers.provider.getBlockNumber()`
+  (or any explorer) reports — two totally different counters advancing
+  at different rates. A proposal's voting-power snapshot was taken
+  against one scale while every script polling "has voting started yet"
+  checked the other, so voting appeared to open instantly and then
+  `castVote` reverted anyway. Same root cause `IntentCommitReveal.sol`'s
+  header comment already documents for using `block.timestamp` epochs
+  instead of block-count ones — just hit again in a different contract
+  that has its own separate clock. Fixed by overriding `clock()`/
+  `CLOCK_MODE()` to run on `block.timestamp` instead, matching the rest
+  of the repo's convention.
+- [`contracts/AncillaGovernor.sol`](contracts/AncillaGovernor.sol) — a
+  standard OpenZeppelin `Governor` composition (`GovernorSettings` +
+  `GovernorCountingSimple` + `GovernorVotes` + `GovernorVotesQuorumFraction`
+  + `GovernorTimelockControl`), not custom voting logic, executing
+  through a plain OpenZeppelin `TimelockController` deployed directly by
+  `scripts/deploy-token.ts` (no wrapper contract needed). **Proven live**
+  (`npm run demo-governor:sepolia`) with a real proposal — propose, wait
+  out the real voting delay, two independent wallets vote, wait out the
+  real voting period, queue, wait out the real timelock delay, execute —
+  that actually minted ANCILLA through the DAO, plus independent
+  confirmation that a direct `mint()` call bypassing governance now
+  reverts. Not yet wired to control anything on `IntentCommitReveal` or
+  `AncillaSwapHook` — their `treasury`/`guardian` fields are `immutable`,
+  so DAO control over them means either a fresh deployment with a
+  governance-controlled address in that slot, or a deeper redesign
+  making those fields mutable-by-timelock instead of immutable. That's a
+  real change to the base protocol's security model, deliberately not
+  made in this pass.
+- [`contracts/AncillaStaking.sol`](contracts/AncillaStaking.sol) — stake
+  ANCILLA, earn a pro-rata share of ETH revenue. Deliberately reuses
+  `AncillaTreasuryMultisig`'s existing, already-live-proven
+  `proposeWithdrawal`/`executeWithdrawal` flow as the funding source
+  instead of inventing a new one — that flow sends plain ETH with no
+  calldata, which lands in this contract's `receive()`, so nothing about
+  the treasury multisig needed to change. Standard O(1)
+  reward-per-token-stored accumulator (the same family as Synthetix's
+  StakingRewards, minus a time-based emission rate, since funding here
+  arrives in irregular lumps whenever the treasury multisig distributes,
+  not a continuous stream). **Proven live** (`npm run demo-staking:sepolia`)
+  — a real 2-of-3 treasury withdrawal sent to the staking contract was
+  picked up as revenue and paid out to the staker, verified via real ETH
+  balance delta, not the return value.
+
+**What this does NOT do.** The token currently has no actual role in the
+protocol beyond governance and revenue-share — it is not (yet) usable as
+commit-reveal bond collateral, which was explicitly part of what was
+asked for. Wiring that in means changing `IntentCommitReveal`'s bond
+accounting to accept an ERC20 alongside or instead of ETH — a real change
+to the core, audited-pending protocol's logic, not an additive module,
+and it raises its own design question (if ANCILLA's price falls, the bond
+it represents becomes cheaper to walk away from — a harder version of the
+flat-bond-vs-notional problem already documented above). Deliberately not
+built without that being decided first. Also explicitly not done, same
+reasoning as everywhere else in this README: **no tokenomics** (supply
+allocation, vesting, distribution mechanism — left entirely to the
+project owner), and **no legal/regulatory review** — a token combining
+collateral utility, governance, and revenue-share is exactly the profile
+most likely to draw securities scrutiny in a given jurisdiction, and
+that's a question for actual legal counsel, not something resolved by
+writing a contract.
+
 ## Contract parameters explained
 
 All timing is in **seconds**, measured via `block.timestamp` — see "A real
@@ -805,7 +899,7 @@ checks rather than relying on manual review alone:
 
 | Command | What it shows |
 |---|---|
-| `npm test` | 148 tests, run 3x consecutively during development to rule out flakiness |
+| `npm test` | 176 tests, run 3x consecutively during development to rule out flakiness |
 | `npm run coverage` | Istanbul/solidity-coverage report — 100% statements/lines/functions across every contract, 94-100% branches on each core contract (`IntentCommitReveal` 94.74%, `AncillaSwapPool` 94.12%, `AncillaTreasuryMultisig` 95.45%, `SwapExecutor` 100%, `AncillaSwapHook` 72%). The `ecrecover`-returns-zero-address branch, once (wrongly) written off here as "impractical to force deliberately," turned out not to be — a signature with `r=0` (not a valid secp256k1 x-coordinate) reliably makes `ecrecover` return the zero address, and is now an actual test. What's left uncovered is genuinely dead by design: defensive fallback code in `slashNoReveal` that the bond-locking fix made intentionally unreachable, `AncillaSwapPool.swap()`'s own equivalent guard, which the AMM formula's own math makes unreachable (see "Sixth" bug), and — honestly, not yet chased down — some delta-sign edge branches in `AncillaHookRouter`/`AncillaLiquidityRouter` (e.g. a swap that moves zero of one currency) that every test so far happens not to hit. |
 | `npm run gas-report` | Per-function gas cost table (e.g. `commitIntent` ~78–95k gas, `revealIntentViaRelay` ~52k gas) |
 | `npm run size` | Deployed bytecode size — `IntentCommitReveal` is 7.10 KiB, `AncillaSwapHook` 6.24 KiB, `AncillaSwapPool` 2.14 KiB, `AncillaTreasuryMultisig` 2.26 KiB, `AncillaHookRouter` 2.77 KiB, `AncillaLiquidityRouter` 2.28 KiB, `SwapExecutor` 1.23 KiB — all well under the 24 KiB EIP-170 limit Arbitrum also enforces (Uniswap's own `PoolManager`, at ~19.3 KiB, is the one contract in this stack close to that ceiling — and it isn't ours; it's already deployed and live) |

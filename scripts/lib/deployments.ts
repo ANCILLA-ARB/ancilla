@@ -102,6 +102,31 @@ export function loadGuardianMultisigDeployment(networkName: string): GuardianMul
   return entry as GuardianMultisigDeployment;
 }
 
+export interface TokenStackDeployment {
+  token: string;
+  timelock: string;
+  governor: string;
+  staking: string;
+}
+
+/** Reads the AncillaToken/AncillaTimelock/AncillaGovernor/AncillaStaking
+ *  entries written by scripts/deploy-token.ts. */
+export function loadTokenStackDeployment(networkName: string): TokenStackDeployment {
+  const data = readDeploymentsFile(networkName);
+  const { AncillaToken, AncillaTimelock, AncillaGovernor, AncillaStaking } = data?.contracts || {};
+  if (!AncillaToken?.address || !AncillaTimelock?.address || !AncillaGovernor?.address || !AncillaStaking?.address) {
+    throw new Error(
+      `deployments/${networkName}.json is missing the token/governance stack — run \`npx hardhat run scripts/deploy-token.ts --network ${networkName}\` first`
+    );
+  }
+  return {
+    token: AncillaToken.address,
+    timelock: AncillaTimelock.address,
+    governor: AncillaGovernor.address,
+    staking: AncillaStaking.address,
+  };
+}
+
 export interface AncillaHookDeployment {
   address: string;
   salt: string;

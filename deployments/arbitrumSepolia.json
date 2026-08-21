@@ -83,7 +83,28 @@
         "0x742d5065F85Cf6456D55522e211e422977B35042"
       ],
       "threshold": 2
+    },
+    "AncillaToken": {
+      "address": "0xaC3fa7eC9b277D677145CdF6B7F551D0cd204182",
+      "cap": "1000000000000000000000000000",
+      "owner": "0xDA0A6b4a9c37046455Cf268ACF24C05b8Cb770dA",
+      "_ownerNote": "owner started as the deployer at deploy time (deploy-token.ts never transfers it); it's the timelock here because scripts/demo-governor.ts's first run minted demo voting power then called transferOwnership — verified on-chain, not copied from the deploy log"
+    },
+    "AncillaTimelock": {
+      "address": "0xDA0A6b4a9c37046455Cf268ACF24C05b8Cb770dA",
+      "minDelaySeconds": 120
+    },
+    "AncillaGovernor": {
+      "address": "0x622E54Cf8eCdB151d1c73cd4FEbAE61D730fA898",
+      "votingDelaySeconds": 60,
+      "votingPeriodSeconds": 300,
+      "proposalThreshold": 0,
+      "quorumNumerator": 4
+    },
+    "AncillaStaking": {
+      "address": "0xa35a54f9a248d0AA2A0255AA214E536467CA7335",
+      "stakingToken": "0xaC3fa7eC9b277D677145CdF6B7F551D0cd204182"
     }
   },
-  "_comment": "Single source of truth for what's actually live on Arbitrum Sepolia. Values above verified directly on-chain (not copied from a deploy log) before this file was created. scripts/deploy.ts overwrites the IntentCommitReveal entry on every fresh deploy, and now REQUIRES AncillaTreasuryMultisig and AncillaGuardianMultisig to already exist in this file (throws instead of silently defaulting treasury/guardian back to a single EOA); scripts/deploy-swap.ts overwrites the TestTokenA/TestTokenB/AncillaSwapPool/SwapExecutor entries on every fresh deploy, without touching IntentCommitReveal; scripts/deploy-treasury.ts overwrites the AncillaTreasuryMultisig entry on every fresh deploy; scripts/deploy-guardian.ts overwrites the AncillaGuardianMultisig entry on every fresh deploy — note that deploying either multisig does NOT retroactively wire it into an already-deployed target's treasury/guardian, since both fields are immutable, only into the NEXT deploy.ts (or deploy-hook.ts) run; scripts/deploy-hook.ts overwrites the UniswapV4PoolManager/Create2Factory/AncillaSwapHook/AncillaHookRouter/AncillaLiquidityRouter/AncillaHookPool entries on every fresh deploy, reusing the existing TestTokenA/TestTokenB and now REQUIRES AncillaTreasuryMultisig and AncillaGuardianMultisig to already exist in this file too, same as deploy.ts — AncillaSwapHook's guardian is wired to the SAME AncillaGuardianMultisig instance as IntentCommitReveal.guardian (proven live in scripts/demo-guardian-multisig-hook.ts: one multisig, two independently deployed targets); scripts/demo*.ts read from here instead of each hardcoding their own (previously inconsistent, some stale) copy of the address."
+  "_comment": "Single source of truth for what's actually live on Arbitrum Sepolia. Values above verified directly on-chain (not copied from a deploy log) before this file was created. scripts/deploy.ts overwrites the IntentCommitReveal entry on every fresh deploy, and now REQUIRES AncillaTreasuryMultisig and AncillaGuardianMultisig to already exist in this file (throws instead of silently defaulting treasury/guardian back to a single EOA); scripts/deploy-swap.ts overwrites the TestTokenA/TestTokenB/AncillaSwapPool/SwapExecutor entries on every fresh deploy, without touching IntentCommitReveal; scripts/deploy-treasury.ts overwrites the AncillaTreasuryMultisig entry on every fresh deploy; scripts/deploy-guardian.ts overwrites the AncillaGuardianMultisig entry on every fresh deploy — note that deploying either multisig does NOT retroactively wire it into an already-deployed target's treasury/guardian, since both fields are immutable, only into the NEXT deploy.ts (or deploy-hook.ts) run; scripts/deploy-hook.ts overwrites the UniswapV4PoolManager/Create2Factory/AncillaSwapHook/AncillaHookRouter/AncillaLiquidityRouter/AncillaHookPool entries on every fresh deploy, reusing the existing TestTokenA/TestTokenB and now REQUIRES AncillaTreasuryMultisig and AncillaGuardianMultisig to already exist in this file too, same as deploy.ts — AncillaSwapHook's guardian is wired to the SAME AncillaGuardianMultisig instance as IntentCommitReveal.guardian (proven live in scripts/demo-guardian-multisig-hook.ts: one multisig, two independently deployed targets); scripts/deploy-token.ts overwrites the AncillaToken/AncillaTimelock/AncillaGovernor/AncillaStaking entries on every fresh deploy, leaving AncillaToken.owner as the deployer (it does NOT transfer ownership to the timelock itself — see AncillaToken's _ownerNote above for how that entry ended up being the timelock anyway, via a separate demo script, not this deploy script); scripts/demo*.ts read from here instead of each hardcoding their own (previously inconsistent, some stale) copy of the address."
 }
